@@ -1,6 +1,6 @@
 Package: radar
 Title: Analysing Animal Movement from Radar
-Version: 0.0.0
+Version: 0.0.1
 Authors@R: c(
     person("Thierry", "Onkelinx", , "thierry.onkelinx@inbo.be", role = c("aut", "cre"),
            comment = c(orcid = "0000-0001-8804-4216", affiliation = "Research Institute for Nature and Forest (INBO)")),
