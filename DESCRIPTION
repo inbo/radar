@@ -12,15 +12,17 @@ Description: Helper functions to analyse the data.
 License: GPL-3
 URL: https://github.com/inbo/radar
 BugReports: https://github.com/inbo/radar/issues
-Encoding: UTF-8
+Imports:
+    assertthat,
+    dplyr,
+    fs,
+    rlang,
+    RSQLite
+Suggests:
+    RPostgreSQL
 Config/checklist/communities: inbo
 Config/checklist/keywords: bird; windmill
+Encoding: UTF-8
 Language: en-GB
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.1
-Imports:
-  assertthat,
-  fs,
-  RSQLite
-Suggests:
-  RPostgreSQL

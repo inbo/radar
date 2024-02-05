@@ -1,0 +1,86 @@
+#' Convert a irregular track into a track with equal time intervals
+#'
+#' The resulting track has
+#'
+#'  - the space-time coordinates (`t`, `x`, `y` and `z`)
+#'  - the step length in 2D and 3D (`step_2d` and `step_3d`)
+#'  - the heading in the x-y plane (`yaw`)
+#'  - the heading in the plane between the z-axis and the direction in
+#'    the x-y plane (`pitch`)
+#'  - the change in yaw and pitch between two consecutive points (`delta_yaw`
+#'    and `delta_pitch`)
+#' @param raw_track A single track as a data.frame with projected space-time
+#' coordinates.
+#' Coordinates should be in meters, the time in seconds.
+#' @param rate the time between two points in the output track.
+#' @importFrom assertthat assert_that has_name is.number
+#' @importFrom dplyr arrange bind_rows filter group_by lag lead mutate
+#' inner_join rename select slice_max slice_min transmute ungroup
+#' @importFrom rlang .data
+#' @export
+equal_time_track <- function(raw_track, rate = 2) {
+  min_delta_t <- 0.9
+  max_speed <- 30
+  assert_that(
+    inherits(raw_track, "data.frame"), has_name(raw_track, "x"),
+    has_name(raw_track, "y"), has_name(raw_track, "z"),
+    has_name(raw_track, "t"), is.number(rate), rate > min_delta_t
+  )
+  stopifnot(all(diff(raw_track$t) > min_delta_t))
+  groundspeed <- sqrt(diff(raw_track$x) ^ 2 + diff(raw_track$y) ^ 2) /
+    diff(raw_track$t)
+  stopifnot(all(groundspeed <= max_speed))
+  raw_track |>
+    mutate(tr = ceiling(.data$t / rate) * rate) |>
+    group_by(.data$tr) |>
+    slice_max(.data$t, n = 1) |>
+    ungroup() |>
+    rename(t0 = "t", x0 = "x", y0 = "y", z0 = "z") |>
+    inner_join(
+      x = data.frame(
+        tr = seq(min(raw_track$t), max(raw_track$t), by = rate)
+      ),
+      by = "tr"
+    ) |>
+    inner_join(
+      raw_track |>
+        mutate(tr = floor(.data$t / rate) * rate) |>
+        group_by(.data$tr) |>
+        slice_min(.data$t, n = 1) |>
+        ungroup() |>
+        rename(t1 = "t", x1 = "x", y1 = "y", z1 = "z"),
+      by = "tr"
+    ) -> spaced
+  spaced |>
+    filter(.data$t0 < .data$t1) |>
+    transmute(
+      x = .data$x0 + (.data$x1 - .data$x0) * (.data$tr - .data$t0) /
+        (.data$t1 - .data$t0),
+      y = .data$y0 + (.data$y1 - .data$y0) * (.data$tr - .data$t0) /
+        (.data$t1 - .data$t0),
+      z = .data$z0 + (.data$z1 - .data$z0) * (.data$tr - .data$t0) /
+        (.data$t1 - .data$t0),
+      t = .data$tr
+    ) |>
+    bind_rows(
+      spaced |>
+        filter(.data$t0 == .data$t1) |>
+        select(t = "tr", x = "x0", y = "y0", z = "z0")
+    ) |>
+    arrange(.data$t) |>
+    mutate(
+      dx = .data$x - lead(.data$x), dy = .data$y - lead(.data$y),
+      dz = .data$z - lead(.data$z),
+      step_2d = sqrt(.data$dx ^ 2 + .data$dy ^ 2),
+      step_3d = sqrt(.data$dx ^ 2 + .data$dy ^ 2 + .data$dz ^ 2),
+      yaw = atan2(.data$dy, .data$dx),
+      pitch = atan2(.data$dz, .data$step_2d),
+      delta_yaw =  .data$yaw - lag(.data$yaw),
+      delta_pitch = .data$pitch - lag(.data$pitch)
+    ) |>
+    filter(!is.na(.data$delta_yaw)) |>
+    select(
+      "t", "x", "y", "z", "step_2d", "step_3d", "yaw", "pitch", "delta_yaw",
+      "delta_pitch"
+    )
+}
