@@ -18,6 +18,9 @@ The resulting track has
 }
 \details{
 \itemize{
+\item the part of the track (\code{part}).
+We split the part at the points where the ground speed is above 30 meter
+per second.
 \item the space-time coordinates (\code{t}, \code{x}, \code{y} and \code{z})
 \item the step length in 2D and 3D (\code{step_2d} and \code{step_3d})
 \item the heading in the x-y plane (\code{yaw})
