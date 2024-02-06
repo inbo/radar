@@ -10,10 +10,10 @@ add_vleemo_bbox <- function(local, remote) {
   )
   "CREATE TABLE IF NOT EXISTS track_bbox
 (
-  id INTEGER PRIMARY KEY, scheme_id INTEGER, length NUMERIC NOT NULL,
-  convex_hull NUMERIC NOT NULL, x_min NUMERIC NOT NULL, x_max NUMERIC NOT NULL,
-  y_min NUMERIC NOT NULL, y_max NUMERIC NOT NULL, z_min NUMERIC NOT NULL,
-  z_max NUMERIC NOT NULL
+  id INTEGER PRIMARY KEY, length NUMERIC NOT NULL, convex_hull NUMERIC NOT NULL,
+  x_min NUMERIC NOT NULL, x_max NUMERIC NOT NULL, y_min NUMERIC NOT NULL,
+  y_max NUMERIC NOT NULL, z_min NUMERIC NOT NULL, z_max NUMERIC NOT NULL,
+  FOREIGN KEY(id) REFERENCES track_time(id)
 )" |>
   dbSendQuery(conn = local) |>
   dbClearResult()
@@ -21,11 +21,11 @@ add_vleemo_bbox <- function(local, remote) {
     dbGetQuery(
       local,
       "WITH relevant AS (SELECT id FROM species WHERE relevant > 0)
-  SELECT t.id, s.scheme, t.scheme_id
+  SELECT t.id, t.track_id, s.scheme, t.scheme_id
   FROM relevant AS r
   INNER JOIN track_time AS t ON r.id = t.species_id
   INNER JOIN scheme AS s ON t.scheme_id = s.id
-  LEFT JOIN track_bbox AS b ON t.id = b.id AND t.scheme_id = b.scheme_id
+  LEFT JOIN track_bbox AS b ON t.id = b.id
   WHERE b.length IS NULL
   LIMIT 10"
     ) -> track_id
@@ -47,14 +47,19 @@ add_vleemo_bbox <- function(local, remote) {
     FROM cte_31370
   )
   SELECT
-    id, length, convex_hull, ST_Xmin(bbox) AS x_min, ST_Xmax(bbox) AS x_max,
-    ST_Ymin(bbox) AS y_min, ST_Ymax(bbox) AS y_max,
+    id AS track_id, length, convex_hull, ST_Xmin(bbox) AS x_min,
+    ST_Xmax(bbox) AS x_max, ST_Ymin(bbox) AS y_min, ST_Ymax(bbox) AS y_max,
     ST_Zmin(bbox) AS z_min, ST_Zmax(bbox) AS z_max
   FROM cte",
-      head(track_id$scheme, 1), paste(track_id$id, collapse = ", ")
+      head(track_id$scheme, 1), paste(track_id$track_id, collapse = ", ")
     ) |>
-      dbGetQuery(conn = remote) -> track_bbox
-    track_bbox$scheme_id <- track_id$scheme_id
-    dbAppendTable(conn = local, name = "track_bbox", value = track_bbox)
+      dbGetQuery(conn = remote) |>
+      inner_join(
+        track_id |>
+          select("id", "track_id"),
+        by = "track_id"
+      ) |>
+      select(-"track_id") |>
+      dbAppendTable(conn = local, name = "track_bbox")
   }
 }

@@ -60,14 +60,19 @@ ORDER BY t.common_name",
     dbGetQuery(conn = local) -> scheme_id
   "CREATE TABLE IF NOT EXISTS track_time
 (
-  id INTEGER PRIMARY KEY, scheme_id INTEGER, species_id INTEGER,
-  start INTEGER NOT NULL, duration NUMERIC NOT NULL
+  id INTEGER PRIMARY KEY AUTOINCREMENT, track_id INTEGER NOT NULL,
+  scheme_id INTEGER, species_id INTEGER,
+  start INTEGER NOT NULL, duration NUMERIC NOT NULL,
+  FOREIGN KEY(scheme_id) REFERENCES scheme(id),
+  FOREIGN KEY(species_id) REFERENCES species(id)
 )" |>
     dbSendQuery(conn = local) |>
     dbClearResult()
   sprintf(
     "INSERT INTO track_time
-SELECT t.id, %i AS scheme_id, s.id AS species_id, t.start, t.duration
+SELECT
+  NULL AS id, t.id AS track_id, %i AS scheme_id, s.id AS species_id, t.start,
+  t.duration
 FROM %s AS t
 LEFT JOIN species AS s ON t.common_name = s.common_name
 LEFT JOIN track_time AS c ON t.id = c.id

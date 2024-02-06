@@ -14,21 +14,23 @@ add_vleemo_track_points <- function(local, remote, rate = 2) {
   "CREATE TABLE IF NOT EXISTS track_equal_time
   (
     id INTEGER PRIMARY KEY AUTOINCREMENT, track_id INTEGER NOT NULL,
-    scheme_id INTEGER NOT NULL, part INTEGER NOT NULL,
-    rate INTEGER NOT NULL CHECK (rate > 0)
+    part INTEGER NOT NULL, rate INTEGER NOT NULL CHECK (rate > 0),
+    FOREIGN KEY(track_id) REFERENCES track_time(id)
   )" |>
     dbSendQuery(conn = local) |>
     dbClearResult()
   "CREATE UNIQUE INDEX IF NOT EXISTS track_equal_time_idx ON track_equal_time
-  (track_id, scheme_id, part, rate)" |>
+  (track_id, part, rate)" |>
     dbSendQuery(conn = local) |>
     dbClearResult()
   "CREATE TABLE IF NOT EXISTS track_equal_time_point
   (
-    equal_time_id INTEGER NOT NULL, t NUMERIC NOT NULL, x NUMERIC NOT NULL,
-    y NUMERIC NOT NULL, z NUMERIC NOT NULL, step_2d NUMERIC NOT NULL,
-    step_3d NUMERIC NOT NULL, yaw NUMERIC NOT NULL, pitch NUMERIC NOT NULL,
-    delta_yaw NUMERIC NOT NULL, delta_pitch NUMERIC NOT NULL
+    id INTEGER PRIMARY KEY AUTOINCREMENT, equal_time_id INTEGER NOT NULL,
+    t NUMERIC NOT NULL, x NUMERIC NOT NULL, y NUMERIC NOT NULL,
+    z NUMERIC NOT NULL, step_2d NUMERIC NOT NULL, step_3d NUMERIC NOT NULL,
+    yaw NUMERIC NOT NULL, pitch NUMERIC NOT NULL, delta_yaw NUMERIC NOT NULL,
+    delta_pitch NUMERIC NOT NULL,
+    FOREIGN KEY(equal_time_id) REFERENCES track_equal_time(id)
   )" |>
     dbSendQuery(conn = local) |>
     dbClearResult()
