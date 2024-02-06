@@ -1,4 +1,4 @@
-Package: radar
+Package: birdradar
 Title: Analysing Animal Movement from Radar
 Version: 0.0.1
 Authors@R: c(

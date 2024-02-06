@@ -41,7 +41,8 @@ add_vleemo_bbox <- function(local, remote) {
   ),
   cte AS (
     SELECT
-      id, ST_Length(track) AS length, ST_Area(ST_ConvexHull(track)) AS convex_hull,
+      id, ST_Length(track) AS length,
+      ST_Area(ST_ConvexHull(track)) AS convex_hull,
       Box3D(track) AS bbox
     FROM cte_31370
   )

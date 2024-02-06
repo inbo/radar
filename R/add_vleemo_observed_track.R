@@ -7,7 +7,7 @@
 #' @param local the connection to the local database
 #' @param scheme the scheme to import
 #' @importFrom assertthat assert_that is.string noNA
-#' @importFrom RPostgreSQL dbClearResult dbGetQuery dbRemoveTable dbSendQuery
+#' @importFrom RSQLite dbClearResult dbGetQuery dbRemoveTable dbSendQuery
 #' dbWriteTable
 #' @export
 add_vleemo_observed_track <- function(local, remote, scheme = "m202206") {
