@@ -41,25 +41,25 @@ add_vleemo_track_points <- function(local, remote, rate = 2) {
   while (TRUE) {
     dbGetQuery(
       conn = local,
-      "SELECT t.id, s.scheme, t.scheme_id
+      "SELECT t.id, s.scheme, tt.scheme_id, tt.track_id
   FROM track_bbox AS t
-  INNER JOIN scheme AS s ON t.scheme_id = s.id
-  LEFT JOIN track_equal_time AS c ON
-    t.scheme_id = c.scheme_id AND t.id = c.track_id
+  INNER JOIN track_time AS tt ON t.id = tt.id
+  INNER JOIN scheme AS s ON tt.scheme_id = s.id
+  LEFT JOIN track_equal_time AS c ON t.id = c.track_id
   WHERE c.rate IS NULL
   LIMIT 1"
     ) -> track_id
     if (nrow(track_id) == 0) {
       break
     }
-    message(track_id$scheme, " ", track_id$id)
+    message(track_id$id)
     sprintf(
       "SELECT
     id, ST_Transform(trajectory, 31370) AS track, trajectory_time AS time,
     trajectory_radarid AS radar
   FROM %s.track
   WHERE id = %i",
-      track_id$scheme, track_id$id
+      track_id$scheme, track_id$track_id
     ) -> query
     tracks <- st_read(dsn = remote, query = query)
     strsplit(tracks$radar, ",") |>
@@ -75,16 +75,24 @@ add_vleemo_track_points <- function(local, remote, rate = 2) {
       as.data.frame() |>
       transmute(x = .data$X, y = .data$Y, z = .data$Z, t = time) |>
       equal_time_track(rate = rate) -> raw_track
-    track_id |>
-      transmute(track_id = .data$id, .data$scheme_id, rate = rate) |>
+    if (nrow(raw_track) == 0) {
+      data.frame(track_id = track_id$id, part = -1, rate = rate) |>
+        dbAppendTable(conn = local, name = "track_equal_time")
+      next
+    }
+    data.frame(
+      track_id = track_id$id, part = unique(raw_track$part), rate = rate
+    ) |>
       dbAppendTable(conn = local, name = "track_equal_time")
     sprintf(
-      "SELECT id FROM track_equal_time WHERE track_id = %i AND scheme_id = %i",
-      track_id$id, track_id$scheme_id
+      "SELECT id AS equal_time_id, part
+  FROM track_equal_time
+  WHERE track_id = %i AND rate = %f",
+      track_id$id, rate
     ) |>
-      dbGetQuery(conn = local) -> equal_id
-    raw_track |>
-      mutate(equal_time_id = equal_id$id) |>
+      dbGetQuery(conn = local) |>
+      inner_join(raw_track, by = "part") |>
+      select(-"part") |>
       dbAppendTable(conn = local, name = "track_equal_time_point")
   }
 }

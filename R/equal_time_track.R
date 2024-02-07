@@ -19,6 +19,7 @@
 #' @importFrom assertthat assert_that has_name is.number
 #' @importFrom dplyr arrange bind_rows filter group_by lag lead mutate
 #' inner_join rename select slice_max slice_min summarise transmute ungroup
+#' @importFrom purrr map2
 #' @importFrom rlang .data
 #' @importFrom tidyr unnest
 #' @export
@@ -31,7 +32,11 @@ equal_time_track <- function(raw_track, rate = 2) {
     has_name(raw_track, "y"), has_name(raw_track, "z"),
     has_name(raw_track, "t"), is.number(rate), rate > min_delta_t
   )
-  stopifnot(all(diff(raw_track$t) > min_delta_t))
+  raw_track |>
+    filter(
+      pmin(.data$t - lag(.data$t), lead(.data$t) - .data$t, na.rm = TRUE) >
+        min_delta_t
+    ) -> raw_track
   groundspeed <- sqrt(diff(raw_track$x) ^ 2 + diff(raw_track$y) ^ 2) /
     diff(raw_track$t)
   raw_track |>
@@ -96,7 +101,7 @@ equal_time_track <- function(raw_track, rate = 2) {
       step_3d = sqrt(.data$dx ^ 2 + .data$dy ^ 2 + .data$dz ^ 2),
       yaw = atan2(.data$dy, .data$dx),
       pitch = atan2(.data$dz, .data$step_2d),
-      delta_yaw =  .data$yaw - lag(.data$yaw),
+      delta_yaw = (.data$yaw - lag(.data$yaw) + pi) %% (2 * pi) - pi,
       delta_pitch = .data$pitch - lag(.data$pitch)
     ) |>
     filter(!is.na(.data$delta_yaw)) |>
