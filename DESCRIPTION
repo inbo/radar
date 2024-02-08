@@ -22,7 +22,9 @@ Imports:
     sf,
     tidyr
 Suggests:
+    INLA,
     RPostgreSQL
+Additional_repositories: https://inla.r-inla-download.org/R/stable
 Config/checklist/communities: inbo
 Config/checklist/keywords: bird; windmill
 Encoding: UTF-8
