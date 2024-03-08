@@ -20,6 +20,7 @@
 #' @importFrom assertthat assert_that has_name is.number noNA
 #' @importFrom dplyr count distinct filter mutate select transmute
 #' @importFrom purrr pmap
+#' @importFrom rlang .data
 #' @importFrom RSQLite dbGetQuery
 #' @importFrom tidyr unnest
 #' @export
