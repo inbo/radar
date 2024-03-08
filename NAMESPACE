@@ -2,6 +2,7 @@
 
 export(add_vleemo_bbox)
 export(add_vleemo_observed_track)
+export(add_vleemo_track)
 export(add_vleemo_track_points)
 export(add_wind)
 export(equal_time_track)

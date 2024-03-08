@@ -1,34 +1,39 @@
 #' Import basic track information
 #'
-#' Select all tracks with manual observations.
+#' Select all tracks without manual observations.
 #' The minimal duration is 1 minute.
 #' The airspeed is between 5 and 30 m/s.
-#' @param remote the connection to the remote database
-#' @param local the connection to the local database
-#' @param scheme the scheme to import
+#' @inheritParams add_vleemo_observed_track
+#' @param classification Select only unobserved tracks with this classification.
 #' @importFrom assertthat assert_that is.string noNA
 #' @importFrom RSQLite dbClearResult dbGetQuery dbRemoveTable dbSendQuery
 #' dbWriteTable
 #' @export
-add_vleemo_observed_track <- function(local, remote, scheme = "m202206") {
+add_vleemo_track <- function(
+  local, remote, scheme = "m202206",
+  classification = c("MEDIUM_BIRD", "SMALL_BIRD", "LARGE_BIRD")
+) {
   assert_that(
     inherits(local, "SQLiteConnection"), is.string(scheme), noNA(scheme),
     inherits(remote, "PostgreSQLConnection")
   )
+  classification <- match.arg(classification)
   temp_table <- paste0("temp_track_", sample(.Machine$integer.max, 1))
   on.exit(dbRemoveTable(conn = local, name = temp_table), add = TRUE)
   sprintf(
     "SELECT DISTINCT
-  t.id, s.common_name, t.timestamp_start AS start,
+  t.id, c.classification AS common_name, t.timestamp_start AS start,
   DATE_PART('hour', t.timestamp_end - t.timestamp_start) * 3600 +
     DATE_PART('minute', t.timestamp_end - t.timestamp_start) * 60 +
     DATE_PART('second', t.timestamp_end - t.timestamp_start) AS duration
-FROM %1$s.observation AS o
-INNER JOIN %1$s.track AS t ON o.track_id = t.id
-INNER JOIN config.species AS s ON o.species_id = s.id
+FROM %1$s.track AS t
+LEFT JOIN %1$s.observation AS o ON o.track_id = t.id
+INNER JOIN %1$s.classification AS c ON t.classification_id = c.id
 WHERE
   t.timestamp_end - t.timestamp_start > '00:01:00' AND
-  5 <= t.airspeed AND t.airspeed <= 30", scheme) |>
+  5 <= t.airspeed AND t.airspeed <= 30 AND
+  o.species_id IS NULL AND c.classification = '%2$s'",
+  scheme, classification) |>
     dbGetQuery(conn = remote) |>
     dbWriteTable(conn = local, name = temp_table)
   "CREATE TABLE IF NOT EXISTS species
