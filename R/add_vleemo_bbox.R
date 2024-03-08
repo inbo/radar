@@ -1,6 +1,7 @@
 #' Add missing bounding box information for relevant tracks
 #' @inheritParams add_vleemo_observed_track
 #' @importFrom assertthat assert_that is.string noNA
+#' @importFrom cli cli_progress_bar cli_progress_done cli_progress_update
 #' @importFrom RSQLite dbAppendTable dbClearResult dbGetQuery dbSendQuery
 #' @export
 add_vleemo_bbox <- function(local, remote) {
@@ -17,22 +18,20 @@ add_vleemo_bbox <- function(local, remote) {
 )" |>
   dbSendQuery(conn = local) |>
   dbClearResult()
-  while (TRUE) {
-    dbGetQuery(
-      local,
-      "WITH relevant AS (SELECT id FROM species WHERE relevant > 0)
-  SELECT t.id, t.track_id, s.scheme, t.scheme_id
-  FROM relevant AS r
-  INNER JOIN track_time AS t ON r.id = t.species_id
-  INNER JOIN scheme AS s ON t.scheme_id = s.id
-  LEFT JOIN track_bbox AS b ON t.id = b.id
-  WHERE b.length IS NULL
-  LIMIT 10"
-    ) -> track_id
-    if (nrow(track_id) == 0) {
-      break
-    }
-    track_id <- track_id[track_id$scheme == head(track_id$scheme, 1), ]
+  dbGetQuery(
+    local,
+    "WITH relevant AS (SELECT id FROM species WHERE relevant > 0)
+    SELECT t.id, t.track_id, s.scheme, t.scheme_id
+    FROM relevant AS r
+    INNER JOIN track_time AS t ON r.id = t.species_id
+    INNER JOIN scheme AS s ON t.scheme_id = s.id
+    LEFT JOIN track_bbox AS b ON t.id = b.id
+    WHERE b.length IS NULL"
+  ) -> track_id
+  cli_progress_bar(name = "Add missing track bbox", total = nrow(track_id))
+  while (nrow(track_id) > 0) {
+    which(track_id$scheme == head(track_id$scheme, 1)) |>
+      head(100) -> this_track
     sprintf(
       "WITH cte_31370 AS (
     SELECT id, ST_Transform(trajectory, 31370) AS track
@@ -51,15 +50,19 @@ add_vleemo_bbox <- function(local, remote) {
     ST_Xmax(bbox) AS x_max, ST_Ymin(bbox) AS y_min, ST_Ymax(bbox) AS y_max,
     ST_Zmin(bbox) AS z_min, ST_Zmax(bbox) AS z_max
   FROM cte",
-      head(track_id$scheme, 1), paste(track_id$track_id, collapse = ", ")
+      head(track_id$scheme, 1),
+      paste(track_id$track_id[this_track], collapse = ", ")
     ) |>
       dbGetQuery(conn = remote) |>
       inner_join(
-        track_id |>
+        track_id[this_track, ] |>
           select("id", "track_id"),
         by = "track_id"
       ) |>
       select(-"track_id") |>
       dbAppendTable(conn = local, name = "track_bbox")
+    cli_progress_update(inc = 1, set = length(this_track))
+    track_id <- track_id[-this_track, ]
   }
+  cli_progress_done()
 }
