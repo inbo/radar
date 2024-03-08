@@ -1,6 +1,7 @@
 #' @inheritParams equal_time_track
 #' @inheritParams add_vleemoe_observed_track
 #' @importFrom assertthat assert_that
+#' @importFrom cli cli_progress_bar cli_progress_done cli_progress_update
 #' @importFrom dplyr transmute
 #' @importFrom sf st_coordinates st_read
 #' @importFrom rlang .data
@@ -38,28 +39,27 @@ add_vleemo_track_points <- function(local, remote, rate = 2) {
   ON track_equal_time_point (equal_time_id, t)" |>
     dbSendQuery(conn = local) |>
     dbClearResult()
-  while (TRUE) {
-    dbGetQuery(
-      conn = local,
-      "SELECT t.id, s.scheme, tt.scheme_id, tt.track_id
+  dbGetQuery(
+    conn = local,
+    "SELECT t.id, s.scheme, tt.scheme_id, tt.track_id
   FROM track_bbox AS t
   INNER JOIN track_time AS tt ON t.id = tt.id
   INNER JOIN scheme AS s ON tt.scheme_id = s.id
   LEFT JOIN track_equal_time AS c ON t.id = c.track_id
-  WHERE c.rate IS NULL
-  LIMIT 1"
-    ) -> track_id
-    if (nrow(track_id) == 0) {
-      break
-    }
-    message(track_id$id)
+  WHERE c.rate IS NULL"
+  ) -> track_id
+  cli_progress_bar(
+    name = "add missing vleemo track points", total = nrow(track_id)
+  )
+  while (nrow(track_id) > 0) {
+    i <- sample(nrow(track_id), 1)
     sprintf(
       "SELECT
     id, ST_Transform(trajectory, 31370) AS track, trajectory_time AS time,
     trajectory_radarid AS radar
   FROM %s.track
   WHERE id = %i",
-      track_id$scheme, track_id$track_id
+      track_id$scheme[i], track_id$track_id[i]
     ) -> query
     tracks <- st_read(dsn = remote, query = query)
     strsplit(tracks$radar, ",") |>
@@ -76,23 +76,28 @@ add_vleemo_track_points <- function(local, remote, rate = 2) {
       transmute(x = .data$X, y = .data$Y, z = .data$Z, t = time) |>
       equal_time_track(rate = rate) -> raw_track
     if (nrow(raw_track) == 0) {
-      data.frame(track_id = track_id$id, part = -1, rate = rate) |>
+      data.frame(track_id = track_id$id[i], part = -1, rate = rate) |>
         dbAppendTable(conn = local, name = "track_equal_time")
+      track_id <- track_id[-i, ]
+      cli_progress_update()
       next
     }
     data.frame(
-      track_id = track_id$id, part = unique(raw_track$part), rate = rate
+      track_id = track_id$id[i], part = unique(raw_track$part), rate = rate
     ) |>
       dbAppendTable(conn = local, name = "track_equal_time")
     sprintf(
       "SELECT id AS equal_time_id, part
   FROM track_equal_time
   WHERE track_id = %i AND rate = %f",
-      track_id$id, rate
+      track_id$id[i], rate
     ) |>
       dbGetQuery(conn = local) |>
       inner_join(raw_track, by = "part") |>
       select(-"part") |>
       dbAppendTable(conn = local, name = "track_equal_time_point")
+    track_id <- track_id[-i, ]
+    cli_progress_update()
   }
+  cli_progress_done()
 }
