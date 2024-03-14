@@ -11,6 +11,8 @@
 ^codecov\.yml$
 ^data-raw$
 ^docs$
+^inst/output$
+^inst/vleemo$
 ^man-roxygen$
 ^organisation.yml$
 ^pkgdown$
