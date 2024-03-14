@@ -1,12 +1,13 @@
 #' Add missing bounding box information for relevant tracks
 #' @inheritParams add_vleemo_observed_track
-#' @importFrom assertthat assert_that is.string noNA
+#' @param step The number of tracks to handle in a single step.
+#' @importFrom assertthat assert_that is.count is.string noNA
 #' @importFrom cli cli_progress_bar cli_progress_done cli_progress_update
 #' @importFrom RSQLite dbAppendTable dbClearResult dbGetQuery dbSendQuery
 #' @export
-add_vleemo_bbox <- function(local, remote) {
+add_vleemo_bbox <- function(local, remote, step = 1000) {
   assert_that(
-    inherits(local, "SQLiteConnection"),
+    inherits(local, "SQLiteConnection"), is.count(step), noNA(step),
     inherits(remote, "PostgreSQLConnection")
   )
   "CREATE TABLE IF NOT EXISTS track_bbox
@@ -31,7 +32,7 @@ add_vleemo_bbox <- function(local, remote) {
   cli_progress_bar(name = "Add missing track bbox", total = nrow(track_id))
   while (nrow(track_id) > 0) {
     which(track_id$scheme == head(track_id$scheme, 1)) |>
-      head(100) -> this_track
+      head(step) -> this_track
     sprintf(
       "WITH cte_31370 AS (
     SELECT id, ST_Transform(trajectory, 31370) AS track
@@ -61,7 +62,7 @@ add_vleemo_bbox <- function(local, remote) {
       ) |>
       select(-"track_id") |>
       dbAppendTable(conn = local, name = "track_bbox")
-    cli_progress_update(inc = 1, set = length(this_track))
+    cli_progress_update(inc = step)
     track_id <- track_id[-this_track, ]
   }
   cli_progress_done()

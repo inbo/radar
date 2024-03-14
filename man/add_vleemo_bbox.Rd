@@ -4,12 +4,14 @@
 \alias{add_vleemo_bbox}
 \title{Add missing bounding box information for relevant tracks}
 \usage{
-add_vleemo_bbox(local, remote)
+add_vleemo_bbox(local, remote, step = 1000)
 }
 \arguments{
 \item{local}{the connection to the local database}
 
 \item{remote}{the connection to the remote database}
+
+\item{step}{The number of tracks to handle in a single step.}
 }
 \description{
 Add missing bounding box information for relevant tracks
