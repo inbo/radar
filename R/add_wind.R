@@ -25,7 +25,8 @@ add_wind <- function(local, remote) {
   "SELECT t.id, t.start, t.duration, s.scheme
 FROM track_time AS t
 INNER JOIN scheme AS s ON t.scheme_id = s.id
-WHERE wind_speed IS NULL" |>
+INNER JOIN track_equal_time AS te ON t.id = te.track_id
+WHERE t.wind_speed IS NULL" |>
     dbGetQuery(conn = local) -> to_do
   cli_progress_bar(
     "Calculating average wind speed and direction", total = nrow(to_do)
@@ -59,5 +60,5 @@ WHERE id = %i",
     to_do <- tail(to_do, -1)
     cli_progress_update()
   }
-  cli_process_done()
+  cli_progress_done()
 }
