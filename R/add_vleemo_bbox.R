@@ -63,7 +63,7 @@ add_vleemo_bbox <- function(local, remote, step = 1000) {
       ) |>
       select(-"track_id") |>
       dbAppendTable(conn = local, name = "track_bbox")
-    cli_progress_update(inc = step)
+    cli_progress_update(inc = length(this_track))
     track_id <- track_id[-this_track, ]
   }
   cli_progress_done()

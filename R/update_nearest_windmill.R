@@ -62,8 +62,8 @@ FROM cte_distance"
       ) |>
       dbSendQuery(conn = local) |>
       dbClearResult()
+    cli_progress_update(inc = min(step, nrow(to_do)))
     to_do <- tail(to_do, -step)
-    cli_progress_update(inc = step)
   }
   cli_progress_done()
 }
