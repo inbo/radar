@@ -55,10 +55,10 @@ add_vleemo_track_points <- function(local, remote, rate = 2) {
     i <- sample(nrow(track_id), 1)
     sprintf(
       "SELECT
-    id, ST_Transform(trajectory, 31370) AS track, trajectory_time AS time,
-    trajectory_radarid AS radar
-  FROM %s.track
-  WHERE id = %i",
+  id, ST_Transform(trajectory, 31370) AS track, trajectory_time AS time,
+  trajectory_radarid AS radar
+FROM %s.track
+WHERE id = %i",
       track_id$scheme[i], track_id$track_id[i]
     ) -> query
     tracks <- st_read(dsn = remote, query = query)

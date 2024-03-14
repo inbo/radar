@@ -5,7 +5,7 @@
 #' @importFrom rlang .data
 #' @importFrom tidyr complete unnest
 windmill_voxel <- function(
-  local, max_distance = 200, voxel_size = rep(max_distance/5, 3),
+  local, max_distance = 200, voxel_size = rep(max_distance / 5, 3),
   voxel_box = matrix(c(-10, -10, 0, 10, 10, 20), nrow = 3)
 ) {
   assert_that(inherits(local, "SQLiteConnection"))
