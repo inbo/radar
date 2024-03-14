@@ -3,6 +3,7 @@
 #' @export
 #' @importFrom cli cli_progress_bar cli_progress_done cli_progress_update
 #' @importFrom RSQLite dbClearResult dbListFields dbSendQuery
+#' @importFrom utils head tail
 add_wind <- function(local, remote) {
   assert_that(
     inherits(local, "SQLiteConnection"),

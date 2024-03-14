@@ -4,6 +4,7 @@
 #' @importFrom assertthat assert_that is.count is.string noNA
 #' @importFrom cli cli_progress_bar cli_progress_done cli_progress_update
 #' @importFrom RSQLite dbAppendTable dbClearResult dbGetQuery dbSendQuery
+#' @importFrom utils head
 #' @export
 add_vleemo_bbox <- function(local, remote, step = 1000) {
   assert_that(
