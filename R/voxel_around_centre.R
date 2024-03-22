@@ -6,6 +6,7 @@
 #' the track.
 #' The x direction is parallel to the wind direction.
 #' @inheritParams add_vleemo_observed_track
+#' @inheritParams equal_time_track
 #' @param centre a data frame with a single row and x and y coordinates of the
 #' centre.
 #' Coordinates in CRS 31370
@@ -26,7 +27,7 @@
 #' @export
 voxel_around_centre <- function(
   local, centre, max_distance = 200, voxel_size = rep(max_distance / 5, 3),
-  voxel_box = matrix(c(-10, -10, 0, 10, 10, 20), nrow = 3)
+  voxel_box = matrix(c(-10, -10, 0, 10, 10, 20), nrow = 3), rate = 2
 ) {
   assert_that(
     inherits(local, "SQLiteConnection"), inherits(centre, "data.frame"),
@@ -56,6 +57,7 @@ cte_direction AS (
   FROM cte_centre AS c
   INNER JOIN track_equal_time AS te ON c.equal_time_id = te.id
   INNER JOIN track_time AS t ON te.track_id = t.id
+  WHERE te.rate = %13i
 ),
 cte_voxel AS (
   SELECT
@@ -77,7 +79,7 @@ WHERE
     sprintf(
       centre$x, centre$y, max_distance, voxel_size[1], voxel_size[2],
       voxel_size[3], voxel_box[1, 1], voxel_box[1, 2], voxel_box[2, 1],
-      voxel_box[2, 2], voxel_box[3, 1], voxel_box[3, 2]
+      voxel_box[2, 2], voxel_box[3, 1], voxel_box[3, 2], rate
     ) |>
     dbGetQuery(conn = local) |>
     mutate(
