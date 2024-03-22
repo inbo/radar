@@ -19,5 +19,12 @@ required:
 spelling:
   default: en-GB
   ignore:
-  - .github
   - LICENSE.md
+  - inst/vleemo/LICENSE.md
+  other:
+    fr-BE: inst/vleemo/_001_resume.Rmd
+    nl-BE:
+    - inst/vleemo/01_inleiding.Rmd
+    - inst/vleemo/02_voxel.Rmd
+    - inst/vleemo/index.Rmd
+    - inst/vleemo/zzz_references_and_appendix.Rmd

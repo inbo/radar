@@ -95,7 +95,7 @@ equal_time_track <- function(raw_track, rate = 2) {
     arrange(.data$t) |>
     group_by(.data$part) |>
     mutate(
-      dx = lead(.data$x) - .data$x , dy = lead(.data$y) - .data$y,
+      dx = lead(.data$x) - .data$x, dy = lead(.data$y) - .data$y,
       dz = lead(.data$z) - .data$z,
       step_2d = sqrt(.data$dx ^ 2 + .data$dy ^ 2),
       step_3d = sqrt(.data$dx ^ 2 + .data$dy ^ 2 + .data$dz ^ 2),
