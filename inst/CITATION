@@ -5,9 +5,9 @@ bibentry(
   title = "birdradar: Analysing Animal Movement from Radar. Version 0.0.1",
   author = c( author = c(person(given = "Thierry", family = "Onkelinx"), person(given = "Raïsa", family = "Carmen"))),
   year = 2024,
-  url = "https://github.com/inbo/radar/",
+  url = "https://github.com/inbo/birdradar/",
   abstract = "Helper functions to analyse the data.",
-  textVersion = "Onkelinx, Thierry; Carmen, Raïsa (2024) birdradar: Analysing Animal Movement from Radar. Version 0.0.1. https://github.com/inbo/radar/",
+  textVersion = "Onkelinx, Thierry; Carmen, Raïsa (2024) birdradar: Analysing Animal Movement from Radar. Version 0.0.1. https://github.com/inbo/birdradar/",
   keywords = "bird; windmill",
 )
 # end checklist entry

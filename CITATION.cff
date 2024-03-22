@@ -20,7 +20,7 @@ contact:
   orcid: 0000-0001-8804-4216
 doi: ~
 license: GPL-3.0
-repository-code: https://github.com/inbo/radar/
+repository-code: https://github.com/inbo/birdradar/
 type: software
 abstract: "Helper functions to analyse the data."
 version: 0.0.1

@@ -10,8 +10,8 @@ Authors@R: c(
   )
 Description: Helper functions to analyse the data.
 License: GPL-3
-URL: https://github.com/inbo/radar
-BugReports: https://github.com/inbo/radar/issues
+URL: https://github.com/inbo/birdradar
+BugReports: https://github.com/inbo/birdradar/issues
 Imports:
     assertthat,
     cli,

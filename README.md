@@ -26,7 +26,7 @@ size](https://img.shields.io/github/repo-size/inbo/birdradar.svg)
 
 # birdradar
 
-The goal of birdradar is to analyse bird tracks optained by radar.
+The goal of birdradar is to analyse bird tracks obtained by radar.
 
 ## Installation
 
