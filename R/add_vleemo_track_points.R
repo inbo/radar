@@ -1,6 +1,6 @@
 #' @inheritParams equal_time_track
 #' @inheritParams add_vleemoe_observed_track
-#' @importFrom assertthat assert_that
+#' @importFrom assertthat assert_that is.count noNA
 #' @importFrom cli cli_progress_bar cli_progress_done cli_progress_update
 #' @importFrom dplyr transmute
 #' @importFrom sf st_coordinates st_read
@@ -9,7 +9,7 @@
 #' @export
 add_vleemo_track_points <- function(local, remote, rate = 2) {
   assert_that(
-    inherits(local, "SQLiteConnection"),
+    inherits(local, "SQLiteConnection"), is.count(rate), noNA(rate),
     inherits(remote, "PostgreSQLConnection")
   )
   "CREATE TABLE IF NOT EXISTS track_equal_time
@@ -39,15 +39,16 @@ add_vleemo_track_points <- function(local, remote, rate = 2) {
   ON track_equal_time_point (equal_time_id, t)" |>
     dbSendQuery(conn = local) |>
     dbClearResult()
-  dbGetQuery(
-    conn = local,
+  sprintf(
     "SELECT t.id, s.scheme, tt.scheme_id, tt.track_id
-  FROM track_bbox AS t
-  INNER JOIN track_time AS tt ON t.id = tt.id
-  INNER JOIN scheme AS s ON tt.scheme_id = s.id
-  LEFT JOIN track_equal_time AS c ON t.id = c.track_id
-  WHERE c.rate IS NULL"
-  ) -> track_id
+FROM track_bbox AS t
+INNER JOIN track_time AS tt ON t.id = tt.id
+INNER JOIN scheme AS s ON tt.scheme_id = s.id
+LEFT JOIN track_equal_time AS c ON t.id = c.track_id
+WHERE c.rate IS NULL OR c.rate != %i",
+    rate
+  ) |>
+  dbGetQuery(conn = local) -> track_id
   cli_progress_bar(
     name = "add missing vleemo track points", total = nrow(track_id)
   )
