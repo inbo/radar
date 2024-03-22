@@ -18,9 +18,12 @@ Imports:
     dplyr,
     fs,
     purrr,
+    Rfast,
     rlang,
     RSQLite,
     sf,
+    stringr,
+    tibble,
     tidyr
 Suggests:
     INLA,
