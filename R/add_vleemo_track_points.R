@@ -20,10 +20,16 @@ add_vleemo_track_points <- function(local, remote, rate = 2) {
   )" |>
     dbSendQuery(conn = local) |>
     dbClearResult()
-  "CREATE UNIQUE INDEX IF NOT EXISTS track_equal_time_idx ON track_equal_time
-  (track_id, part, rate)" |>
+  "DROP INDEX IF EXISTS track_equal_time_idx" |>
     dbSendQuery(conn = local) |>
     dbClearResult()
+  on.exit(
+    "CREATE UNIQUE INDEX IF NOT EXISTS track_equal_time_idx ON track_equal_time
+    (track_id, part, rate)" |>
+      dbSendQuery(conn = local) |>
+      dbClearResult(),
+    add = TRUE
+  )
   "CREATE TABLE IF NOT EXISTS track_equal_time_point
   (
     id INTEGER PRIMARY KEY AUTOINCREMENT, equal_time_id INTEGER NOT NULL,
@@ -35,32 +41,41 @@ add_vleemo_track_points <- function(local, remote, rate = 2) {
   )" |>
     dbSendQuery(conn = local) |>
     dbClearResult()
-  "CREATE UNIQUE INDEX IF NOT EXISTS track_equal_time_point_idx
-  ON track_equal_time_point (equal_time_id, t)" |>
+  "DROP INDEX IF EXISTS track_equal_time_point_idx" |>
     dbSendQuery(conn = local) |>
     dbClearResult()
-  sprintf(
-    "SELECT t.id, s.scheme, tt.scheme_id, tt.track_id
+  on.exit(
+    "CREATE UNIQUE INDEX IF NOT EXISTS track_equal_time_point_idx
+    ON track_equal_time_point (equal_time_id, t)" |>
+      dbSendQuery(conn = local) |>
+      dbClearResult(),
+    add = TRUE
+  )
+  "WITH cte AS (
+  SELECT track_id
+  FROM track_equal_time
+  WHERE rate = %i
+  GROUP BY track_id
+)
+SELECT t.id, s.scheme, tt.scheme_id, tt.track_id
 FROM track_bbox AS t
 INNER JOIN track_time AS tt ON t.id = tt.id
 INNER JOIN scheme AS s ON tt.scheme_id = s.id
-LEFT JOIN track_equal_time AS c ON t.id = c.track_id
-WHERE c.rate IS NULL OR c.rate != %i",
-    rate
-  ) |>
-  dbGetQuery(conn = local) -> track_id
+LEFT JOIN cte AS c ON t.id = c.track_id
+WHERE c.track_id IS NULL" |>
+    sprintf(rate) |>
+    dbGetQuery(conn = local) -> track_id
   cli_progress_bar(
     name = "add missing vleemo track points", total = nrow(track_id)
   )
   while (nrow(track_id) > 0) {
-    i <- sample(nrow(track_id), 1)
     sprintf(
       "SELECT
   id, ST_Transform(trajectory, 31370) AS track, trajectory_time AS time,
   trajectory_radarid AS radar
 FROM %s.track
 WHERE id = %i",
-      track_id$scheme[i], track_id$track_id[i]
+      head(track_id$scheme, 1), head(track_id$track_id, 1)
     ) -> query
     tracks <- st_read(dsn = remote, query = query)
     strsplit(tracks$radar, ",") |>
@@ -77,27 +92,28 @@ WHERE id = %i",
       transmute(x = .data$X, y = .data$Y, z = .data$Z, t = time) |>
       equal_time_track(rate = rate) -> raw_track
     if (nrow(raw_track) == 0) {
-      data.frame(track_id = track_id$id[i], part = -1, rate = rate) |>
+      data.frame(track_id = head(track_id$id, 1), part = -1, rate = rate) |>
         dbAppendTable(conn = local, name = "track_equal_time")
-      track_id <- track_id[-i, ]
+      track_id <- tail(track_id, -1)
       cli_progress_update()
       next
     }
     data.frame(
-      track_id = track_id$id[i], part = unique(raw_track$part), rate = rate
+      track_id = head(track_id$id, 1), part = unique(raw_track$part),
+      rate = rate
     ) |>
       dbAppendTable(conn = local, name = "track_equal_time")
     sprintf(
       "SELECT id AS equal_time_id, part
   FROM track_equal_time
   WHERE track_id = %i AND rate = %f",
-      track_id$id[i], rate
+      head(track_id$id, 1), rate
     ) |>
       dbGetQuery(conn = local) |>
       inner_join(raw_track, by = "part") |>
       select(-"part") |>
       dbAppendTable(conn = local, name = "track_equal_time_point")
-    track_id <- track_id[-i, ]
+    track_id <- tail(track_id, -1)
     cli_progress_update()
   }
   cli_progress_done()
