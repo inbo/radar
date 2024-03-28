@@ -51,23 +51,23 @@ cte_centre AS (
 ),
 cte_direction AS (
   SELECT
-    c.equal_time_id, c.t, c.z,
+    t.id, c.equal_time_id, c.t, c.z,
     ATAN2(c.y0, c.x0) - radians(90 - t.wind_direction) AS direction,
     SQRT(POWER(c.x0, 2) + POWER(c.y0, 2)) AS distance
   FROM cte_centre AS c
   INNER JOIN track_equal_time AS te ON c.equal_time_id = te.id
   INNER JOIN track_time AS t ON te.track_id = t.id
-  WHERE te.rate = %13i
+  WHERE te.rate = %13$i
 ),
 cte_voxel AS (
   SELECT
-    equal_time_id, t, distance * COS(direction) / %4$f AS xv,
+    id, equal_time_id, t, distance * COS(direction) / %4$f AS xv,
     distance * SIN(direction) / %5$f AS yv, z / %6$f AS zv
   FROM cte_direction
 )
 SELECT
-  v0.equal_time_id, v0.xv AS x0, v1.xv AS x1, v0.yv AS y0, v1.yv AS y1,
-  v0.zv AS z0, v1.zv AS z1
+  v0.id AS track_id, v0.xv AS x0, v1.xv AS x1, v0.yv AS y0,
+  v1.yv AS y1, v0.zv AS z0, v1.zv AS z1
 FROM cte_voxel AS v0
 INNER JOIN cte_voxel AS v1 ON
   v0.t = v1.t - 2 AND v0.equal_time_id = v1.equal_time_id
@@ -97,12 +97,12 @@ WHERE
     ) |>
     unnest("x") |>
     transmute(
-      .data$equal_time_id, .data$x,
+      .data$track_id, .data$x,
       y = round(.data$y0 + (.data$x - .data$x0) * .data$dy / .data$dx),
       z = round(.data$z0 + (.data$x - .data$x0) * .data$dz / .data$dx),
       x = round(.data$x)
     ) |>
-    distinct(.data$equal_time_id, .data$x, .data$y, .data$z) |>
+    distinct(.data$track_id, .data$x, .data$y, .data$z) |>
     count(.data$x, .data$y, .data$z) |>
     filter(
       voxel_box[1, 1] <= .data$x, .data$x <= voxel_box[1, 2],
