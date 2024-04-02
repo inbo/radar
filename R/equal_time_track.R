@@ -10,8 +10,8 @@
 #' coordinates.
 #' Coordinates should be in meters, the time in seconds.
 #' @importFrom assertthat assert_that has_name is.number
-#' @importFrom dplyr arrange bind_rows filter group_by lag lead mutate
-#' inner_join rename select slice_max slice_min summarise transmute ungroup
+#' @importFrom dplyr across arrange bind_rows filter group_by inner_join lag
+#' lead mutate rename select slice_max slice_min summarise transmute ungroup
 #' @importFrom purrr map2
 #' @importFrom rlang .data
 #' @importFrom tidyr unnest
