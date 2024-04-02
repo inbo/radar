@@ -2,6 +2,7 @@
 #' @inheritParams add_vleemo_observed_track
 #' @inheritParams equal_time_track
 #' @inheritParams voxel_around_centre
+#' @inheritParams get_tracks_around_centre
 #' @export
 #' @importFrom assertthat assert_that has_name is.count noNA
 #' @importFrom cli cli_progress_bar cli_progress_done cli_progress_update

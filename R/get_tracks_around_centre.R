@@ -2,6 +2,14 @@
 #' @inheritParams add_vleemo_observed_track
 #' @inheritParams equal_time_track
 #' @inheritParams voxel_around_centre
+#' @param max_height Only use track points with an altitude lower than
+#' `max_height`.
+#' Defaults to 200 meter.
+#' @param max_tracks Return only the nearest `max_tracks` tracks.
+#' @param relevant The value of the `relevant` variable of the `species` table
+#' in the database.
+#' Select only tracks from species with a value equal or larger than this
+#' number.
 #' @export
 #' @importFrom assertthat assert_that has_name is.count noNA
 #' @importFrom RSQLite dbGetQuery

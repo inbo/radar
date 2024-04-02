@@ -40,6 +40,7 @@ spelling:
     fr-BE: inst/vleemo/_001_resume.Rmd
     nl-BE:
     - inst/vleemo/01_inleiding.Rmd
-    - inst/vleemo/02_voxel.Rmd
+    - inst/vleemo/02_overzicht.Rmd
+    - inst/vleemo/03_voxel.Rmd
     - inst/vleemo/index.Rmd
     - inst/vleemo/zzz_references_and_appendix.Rmd

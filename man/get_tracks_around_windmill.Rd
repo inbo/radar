@@ -20,6 +20,17 @@ get_tracks_around_windmill(
 \item{max_distance}{Use all equal time tracks where the minimum distance in
 meters between the track and the centre is smaller than \code{max_distance}.}
 
+\item{max_height}{Only use track points with an altitude lower than
+\code{max_height}.
+Defaults to 200 meter.}
+
+\item{max_tracks}{Return only the nearest \code{max_tracks} tracks.}
+
+\item{relevant}{The value of the \code{relevant} variable of the \code{species} table
+in the database.
+Select only tracks from species with a value equal or larger than this
+number.}
+
 \item{rate}{the time between two points in the output track.}
 }
 \description{
