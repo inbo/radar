@@ -31,7 +31,8 @@ in the database.
 Select only tracks from species with a value equal or larger than this
 number.}
 
-\item{rate}{the time between two points in the output track.}
+\item{rate}{The time difference between points to calculate the step length
+and turning angles.}
 }
 \description{
 extracts tracks nearest to windmills
