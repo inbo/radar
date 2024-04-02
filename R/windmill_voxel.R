@@ -10,7 +10,7 @@
 #' @importFrom tidyr complete unnest
 windmill_voxel <- function(
   local, max_distance = 200, voxel_size = rep(max_distance / 5, 3),
-  voxel_box = matrix(c(-10, -10, 0, 10, 10, 20), nrow = 3), rate = 2
+  voxel_box = matrix(c(-10, -10, 0, 10, 10, 20), nrow = 3)
 ) {
   assert_that(inherits(local, "SQLiteConnection"))
   dbGetQuery(local, "SELECT id AS windmill, x, y FROM windmill") |>
@@ -20,7 +20,7 @@ windmill_voxel <- function(
         ~voxel_around_centre(
           local = local, centre = data.frame(x = .x, y = .y),
           max_distance = max_distance, voxel_size = voxel_size,
-          voxel_box = voxel_box, rate = rate
+          voxel_box = voxel_box
         )
       )
     ) |>

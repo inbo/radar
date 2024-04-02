@@ -9,8 +9,7 @@ voxel_around_centre(
   centre,
   max_distance = 200,
   voxel_size = rep(max_distance/5, 3),
-  voxel_box = matrix(c(-10, -10, 0, 10, 10, 20), nrow = 3),
-  rate = 2
+  voxel_box = matrix(c(-10, -10, 0, 10, 10, 20), nrow = 3)
 )
 }
 \arguments{
@@ -30,8 +29,6 @@ use.
 Defined using the index number of the voxels.
 Defaults to 10 voxels on both side of the centre in x and y and 20 voxels
 above 0 in the z direction.}
-
-\item{rate}{the time between two points in the output track.}
 }
 \description{
 A voxel is the 3D equivalent of a pixel.
