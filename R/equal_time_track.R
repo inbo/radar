@@ -6,16 +6,9 @@
 #'    We split the part at the points where the ground speed is above 30 meter
 #'    per second.
 #'  - the space-time coordinates (`t`, `x`, `y` and `z`)
-#'  - the step length in 2D and 3D (`step_2d` and `step_3d`)
-#'  - the heading in the x-y plane (`yaw`)
-#'  - the heading in the plane between the z-axis and the direction in
-#'    the x-y plane (`pitch`)
-#'  - the change in yaw and pitch between two consecutive points (`delta_yaw`
-#'    and `delta_pitch`)
 #' @param raw_track A single track as a data.frame with projected space-time
 #' coordinates.
 #' Coordinates should be in meters, the time in seconds.
-#' @param rate the time between two points in the output track.
 #' @importFrom assertthat assert_that has_name is.number
 #' @importFrom dplyr arrange bind_rows filter group_by lag lead mutate
 #' inner_join rename select slice_max slice_min summarise transmute ungroup
@@ -23,59 +16,72 @@
 #' @importFrom rlang .data
 #' @importFrom tidyr unnest
 #' @export
-equal_time_track <- function(raw_track, rate = 2) {
+equal_time_track <- function(raw_track) {
   min_delta_t <- 0.9
   max_speed <- 30
   min_duration <- 60
+  max_gap <- 5
   assert_that(
     inherits(raw_track, "data.frame"), has_name(raw_track, "x"),
-    has_name(raw_track, "y"), has_name(raw_track, "z"),
-    has_name(raw_track, "t"), is.number(rate), rate > min_delta_t
+    has_name(raw_track, "y"), has_name(raw_track, "z"), has_name(raw_track, "t")
   )
   raw_track |>
     filter(
       pmin(.data$t - lag(.data$t), lead(.data$t) - .data$t, na.rm = TRUE) >
         min_delta_t
-    ) -> raw_track
-  groundspeed <- sqrt(diff(raw_track$x) ^ 2 + diff(raw_track$y) ^ 2) /
-    diff(raw_track$t)
-  raw_track |>
+    ) |>
     mutate(
-      part = c(NA, groundspeed) |>
-        pmax(c(groundspeed, NA), na.rm = TRUE),
-      part = cumsum(.data$part > max_speed)
+      part = cumsum(
+        .data$t - lag(.data$t, 1, default = .data$t[1]) > max_gap
+      )
     ) -> raw_track
   raw_track |>
     group_by(.data$part) |>
-    summarise(start = min(.data$t), end = max(.data$t)) |>
     mutate(
-      start = ceiling(.data$start / rate) * rate,
-      end = floor(.data$end / rate) * rate
+      groundspeed = c(
+        0, sqrt(diff(.data$x) ^ 2 + diff(.data$y) ^ 2) / diff(.data$t)
+      ),
+      yaw = atan2(lag(.data$y, 1) - .data$y, lag(.data$x, 1) - .data$x),
+      delta_yaw = lead(.data$yaw, 1) - .data$yaw,
+      delta_yaw = .data$delta_yaw + pi *
+        ifelse(.data$delta_yaw > pi, -2, ifelse(.data$delta_yaw < -pi, 2, 0))
     ) |>
+    ungroup() |>
+    mutate(
+      part = cumsum(
+        c(0, diff(.data$part)) + (.data$groundspeed > max_speed) +
+          !(is.na(.data$delta_yaw) | abs(.data$delta_yaw) <= pi * 7 / 8)
+      )
+    ) -> raw_track
+  raw_track |>
+    group_by(.data$part) |>
+    summarise(start = min(.data$t), end = max(.data$t), .groups = "drop") |>
     filter(.data$end - .data$start >= min_duration) -> parts
   raw_track |>
-    mutate(tr = ceiling(.data$t / rate) * rate) |>
+    mutate(tr = ceiling(.data$t)) |>
     group_by(.data$part, .data$tr) |>
     slice_max(.data$t, n = 1) |>
     ungroup() |>
-    rename(t0 = "t", x0 = "x", y0 = "y", z0 = "z") |>
+    select("part", "tr", t0 = "t", x0 = "x", y0 = "y", z0 = "z") |>
     inner_join(
       x = parts |>
         transmute(
-          .data$part, tr = map2(.data$start, .data$end, ~seq(.x, .y, by = rate))
+          .data$part,
+          tr = map2(ceiling(.data$start), floor(.data$end), ~seq(.x, .y))
         ) |>
         unnest("tr"),
       by = c("part", "tr")
     ) |>
     inner_join(
       raw_track |>
-        mutate(tr = floor(.data$t / rate) * rate) |>
+        mutate(tr = floor(.data$t)) |>
         group_by(.data$part, .data$tr) |>
         slice_min(.data$t, n = 1) |>
         ungroup() |>
-        rename(t1 = "t", x1 = "x", y1 = "y", z1 = "z"),
+        select("part", "tr", t1 = "t", x1 = "x", y1 = "y", z1 = "z"),
       by = c("part", "tr")
-    ) -> spaced
+    ) |>
+    mutate(across(c("part", "tr"), as.integer)) -> spaced
   spaced |>
     filter(.data$t0 < .data$t1) |>
     transmute(
@@ -92,22 +98,5 @@ equal_time_track <- function(raw_track, rate = 2) {
         filter(.data$t0 == .data$t1) |>
         select("part", t = "tr", x = "x0", y = "y0", z = "z0")
     ) |>
-    arrange(.data$t) |>
-    group_by(.data$part) |>
-    mutate(
-      dx = lead(.data$x) - .data$x, dy = lead(.data$y) - .data$y,
-      dz = lead(.data$z) - .data$z,
-      step_2d = sqrt(.data$dx ^ 2 + .data$dy ^ 2),
-      step_3d = sqrt(.data$dx ^ 2 + .data$dy ^ 2 + .data$dz ^ 2),
-      yaw = atan2(.data$dy, .data$dx),
-      pitch = atan2(.data$dz, .data$step_2d),
-      delta_yaw = (.data$yaw - lag(.data$yaw) + pi) %% (2 * pi) - pi,
-      delta_pitch = .data$pitch - lag(.data$pitch)
-    ) |>
-    filter(!is.na(.data$delta_yaw)) |>
-    ungroup() |>
-    select(
-      "part", "t", "x", "y", "z", "step_2d", "step_3d", "yaw", "pitch",
-      "delta_yaw", "delta_pitch"
-    )
+    arrange(.data$t)
 }

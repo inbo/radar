@@ -4,14 +4,12 @@
 \alias{equal_time_track}
 \title{Convert a irregular track into a track with equal time intervals}
 \usage{
-equal_time_track(raw_track, rate = 2)
+equal_time_track(raw_track)
 }
 \arguments{
 \item{raw_track}{A single track as a data.frame with projected space-time
 coordinates.
 Coordinates should be in meters, the time in seconds.}
-
-\item{rate}{the time between two points in the output track.}
 }
 \description{
 The resulting track has
@@ -22,11 +20,5 @@ The resulting track has
 We split the part at the points where the ground speed is above 30 meter
 per second.
 \item the space-time coordinates (\code{t}, \code{x}, \code{y} and \code{z})
-\item the step length in 2D and 3D (\code{step_2d} and \code{step_3d})
-\item the heading in the x-y plane (\code{yaw})
-\item the heading in the plane between the z-axis and the direction in
-the x-y plane (\code{pitch})
-\item the change in yaw and pitch between two consecutive points (\code{delta_yaw}
-and \code{delta_pitch})
 }
 }
