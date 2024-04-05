@@ -17,8 +17,8 @@ add_available_tracks <- function(local, remote) {
   "CREATE TABLE IF NOT EXISTS track_available
   (
     id INTEGER PRIMARY KEY AUTOINCREMENT, scheme_id INTEGER,
-    classification_id INTEGER, species_id INTEGER, n INTEGER,
-    FOREIGN KEY(scheme_id) REFERENCES scheme(id),
+    classification_id INTEGER, species_id INTEGER, duration INTEGER,
+    speed INTEGER, n INTEGER, FOREIGN KEY(scheme_id) REFERENCES scheme(id),
     FOREIGN KEY(classification_id) REFERENCES species(id),
     FOREIGN KEY(species_id) REFERENCES species(id)
   )" |>
@@ -36,17 +36,27 @@ WHERE c.scheme_id IS NULL" |>
     dbGetQuery(conn = local) -> scheme
   cli_progress_bar(name = "overview available tracks", total = nrow(scheme))
   while (nrow(scheme) > 0) {
-    "WITH cte AS (
-  SELECT t.classification_id, o.species_id, COUNT(*) AS n
+    "WITH cte_detail AS (
+  SELECT
+    t.classification_id, o.species_id,
+    FLOOR(
+      2 * DATE_PART('minutes', t.timestamp_end - t.timestamp_start) +
+      DATE_PART('seconds', t.timestamp_end - t.timestamp_start) / 30
+    ) AS duration,
+    FLOOR(t.airspeed / 5) AS speed
   FROM %1$s.track AS t
   LEFT JOIN %1$s.observation AS o ON t.id = o.track_id
-  GROUP BY t.classification_id, o.species_id
+),
+cte_sum AS (
+  SELECT classification_id, species_id, duration, speed, COUNT(*) AS n
+  FROM cte_detail
+  GROUP BY classification_id, species_id, duration, speed
 )
-SELECT l.classification, s.common_name, c.n
-FROM cte AS c
+SELECT l.classification, s.common_name, c.duration, c.speed, c.n
+FROM cte_sum AS c
 LEFT JOIN %1$s.classification AS l ON c.classification_id = l.id
 LEFT JOIN config.species AS s ON c.species_id = s.id" |>
-      sprintf(head(scheme$scheme, 1)) |>
+  sprintf(head(scheme$scheme, 1)) |>
       dbGetQuery(conn = remote) -> tracks
     tracks |>
       distinct(common_name = .data$classification) |>
