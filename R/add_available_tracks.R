@@ -83,7 +83,7 @@ LEFT JOIN config.species AS s ON c.species_id = s.id" |>
       ) |>
       transmute(
         scheme_id = head(scheme$id, 1), .data$classification_id,
-        .data$species_id, .data$n
+        .data$species_id, .data$duration, .data$speed, .data$n
       ) |>
       dbAppendTable(conn = local, name = "track_available")
     scheme <- tail(scheme, -1)
