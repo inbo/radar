@@ -5,7 +5,7 @@
 #' @inheritParams add_vleemo_observed_track
 #' @importFrom assertthat assert_that
 #' @importFrom dplyr anti_join distinct filter left_join mutate select transmute
-#' @importFrom RSQLite dbAppendTable dbClearResult dbGetQuery dbSendQuery
+#' @importFrom RSQLite dbAppendTable dbExecute dbGetQuery
 #' @importFrom rlang .data
 #' @importFrom utils head
 #' @export
@@ -22,8 +22,7 @@ add_available_tracks <- function(local, remote) {
     FOREIGN KEY(classification_id) REFERENCES species(id),
     FOREIGN KEY(species_id) REFERENCES species(id)
   )" |>
-      dbSendQuery(conn = local) |>
-      dbClearResult()
+      dbExecute(conn = local)
   "SELECT id, common_name FROM species" |>
     dbGetQuery(conn = local) -> species
   "WITH cte AS (

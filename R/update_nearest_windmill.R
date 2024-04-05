@@ -3,7 +3,7 @@
 #' @export
 #' @importFrom assertthat assert_that is.count noNA
 #' @importFrom cli cli_progress_bar cli_progress_done cli_progress_update
-#' @importFrom RSQLite dbClearResult dbGetQuery dbSendQuery
+#' @importFrom RSQLite dbExecute dbGetQuery
 #' @importFrom utils head tail
 update_nearest_windmill <- function(local, step = 1000) {
   assert_that(inherits(local, "SQLiteConnection"), is.count(step), noNA(step))
@@ -14,20 +14,17 @@ update_nearest_windmill <- function(local, step = 1000) {
   FOREIGN KEY(track_id) REFERENCES track_equal_time(id),
   FOREIGN KEY(windmill_id) REFERENCES windmill(id)
 )" |>
-    dbSendQuery(conn = local) |>
-    dbClearResult()
+    dbExecute(conn = local)
   "CREATE UNIQUE INDEX IF NOT EXISTS windmill_track_distance_idx
 ON windmill_track_distance (track_id, windmill_id)" |>
-    dbSendQuery(conn = local) |>
-    dbClearResult()
+    dbExecute(conn = local)
 "DELETE FROM windmill_track_distance WHERE id IN (
   SELECT wtd.id
   FROM windmill_track_distance AS wtd
   LEFT JOIN windmill AS w ON w.id = wtd.windmill_id
   WHERE w.id IS NULL
 )" |>
-  dbSendQuery(conn = local) |>
-  dbClearResult()
+  dbExecute(conn = local)
   "SELECT tet.id
 FROM track_equal_time AS tet
 LEFT JOIN windmill_track_distance AS wtd ON wtd.track_id = tet.id
@@ -60,8 +57,7 @@ INSERT INTO windmill_track_distance
 SELECT NULL AS id, track_id, windmill_id, distance
 FROM cte_distance"
       ) |>
-      dbSendQuery(conn = local) |>
-      dbClearResult()
+      dbExecute(conn = local)
     cli_progress_update(inc = min(step, nrow(to_do)))
     to_do <- tail(to_do, -step)
   }

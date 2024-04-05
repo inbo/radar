@@ -7,8 +7,7 @@
 #' @param local the connection to the local database
 #' @param scheme the scheme to import
 #' @importFrom assertthat assert_that is.string noNA
-#' @importFrom RSQLite dbClearResult dbGetQuery dbRemoveTable dbSendQuery
-#' dbWriteTable
+#' @importFrom RSQLite dbExecute dbGetQuery dbRemoveTable dbWriteTable
 #' @export
 add_vleemo_observed_track <- function(local, remote, scheme = "m202206") {
   assert_that(
@@ -36,8 +35,7 @@ WHERE
   id INTEGER PRIMARY KEY AUTOINCREMENT, common_name TEXT UNIQUE NOT NULL,
   relevant INTEGER
 )" |>
-    dbSendQuery(conn = local) |>
-    dbClearResult()
+    dbExecute(conn = local)
   sprintf("
 INSERT INTO species
 SELECT DISTINCT f.id, t.common_name, 0 AS relevant
@@ -47,15 +45,12 @@ WHERE f.id IS NULL
 ORDER BY t.common_name",
     temp_table
   ) |>
-    dbSendQuery(conn = local) |>
-    dbClearResult()
+    dbExecute(conn = local)
   "CREATE TABLE IF NOT EXISTS scheme
 (id INTEGER PRIMARY KEY AUTOINCREMENT, scheme TEXT UNIQUE NOT NULL)" |>
-    dbSendQuery(conn = local) |>
-    dbClearResult()
+    dbExecute(conn = local)
   sprintf("INSERT OR IGNORE INTO scheme (scheme) VALUES ('%s')", scheme) |>
-    dbSendQuery(conn = local) |>
-    dbClearResult()
+    dbExecute(conn = local)
   sprintf("SELECT id FROM scheme WHERE scheme = '%s'", scheme) |>
     dbGetQuery(conn = local) -> scheme_id
   "CREATE TABLE IF NOT EXISTS track_time
@@ -66,8 +61,7 @@ ORDER BY t.common_name",
   FOREIGN KEY(scheme_id) REFERENCES scheme(id),
   FOREIGN KEY(species_id) REFERENCES species(id)
 )" |>
-    dbSendQuery(conn = local) |>
-    dbClearResult()
+  dbExecute(conn = local)
   sprintf(
     "INSERT INTO track_time
 SELECT
@@ -78,6 +72,5 @@ LEFT JOIN species AS s ON t.common_name = s.common_name
 LEFT JOIN track_time AS c ON t.id = c.id
 WHERE c.start IS NULL", scheme_id$id, temp_table
   ) |>
-    dbSendQuery(conn = local) |>
-    dbClearResult()
+    dbExecute(conn = local)
 }

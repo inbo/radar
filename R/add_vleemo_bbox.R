@@ -3,7 +3,7 @@
 #' @param step The number of tracks to handle in a single step.
 #' @importFrom assertthat assert_that is.count is.string noNA
 #' @importFrom cli cli_progress_bar cli_progress_done cli_progress_update
-#' @importFrom RSQLite dbAppendTable dbClearResult dbGetQuery dbSendQuery
+#' @importFrom RSQLite dbAppendTable dbExecute dbGetQuery
 #' @importFrom utils head
 #' @export
 add_vleemo_bbox <- function(local, remote, step = 1000) {
@@ -18,8 +18,7 @@ add_vleemo_bbox <- function(local, remote, step = 1000) {
   y_max NUMERIC NOT NULL, z_min NUMERIC NOT NULL, z_max NUMERIC NOT NULL,
   FOREIGN KEY(id) REFERENCES track_time(id)
 )" |>
-  dbSendQuery(conn = local) |>
-  dbClearResult()
+  dbExecute(conn = local)
   dbGetQuery(
     local,
     "WITH relevant AS (SELECT id FROM species WHERE relevant > 0)

@@ -2,7 +2,7 @@
 #' @inheritParams add_vleemo_observed_track
 #' @export
 #' @importFrom cli cli_progress_bar cli_progress_done cli_progress_update
-#' @importFrom RSQLite dbClearResult dbListFields dbSendQuery
+#' @importFrom RSQLite dbExecute dbListFields
 #' @importFrom utils head tail
 add_wind <- function(local, remote) {
   assert_that(
@@ -10,18 +10,15 @@ add_wind <- function(local, remote) {
     inherits(remote, "PostgreSQLConnection")
   )
   if (!"wind_speed" %in% dbListFields(local, "track_time")) {
-    dbSendQuery(
-      conn = local,
-      statement = "ALTER TABLE track_time ADD wind_speed NUMERIC"
-    ) |>
-      dbClearResult()
+    dbExecute(
+      conn = local, statement = "ALTER TABLE track_time ADD wind_speed NUMERIC"
+    )
   }
   if (!"wind_direction" %in% dbListFields(local, "track_time")) {
-    dbSendQuery(
+    dbExecute(
       conn = local,
       statement = "ALTER TABLE track_time ADD wind_direction NUMERIC"
-    ) |>
-      dbClearResult()
+    )
   }
   "SELECT t.id, t.start, t.duration, s.scheme
 FROM track_time AS t
@@ -56,8 +53,7 @@ WHERE id = %i",
       speed_direction$wind_speed, speed_direction$wind_direction,
       head(to_do$id, 1)
     ) |>
-      dbSendQuery(conn = local) |>
-      dbClearResult()
+      dbExecute(conn = local)
     to_do <- tail(to_do, -1)
     cli_progress_update()
   }
