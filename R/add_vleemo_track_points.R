@@ -3,7 +3,7 @@
 #' @inheritParams add_vleemo_observed_track
 #' @importFrom assertthat assert_that is.count noNA
 #' @importFrom cli cli_progress_bar cli_progress_done cli_progress_update
-#' @importFrom dplyr arrange transmute
+#' @importFrom dplyr transmute
 #' @importFrom sf st_coordinates st_read
 #' @importFrom rlang .data
 #' @importFrom RSQLite dbAppendTable dbClearResult dbGetQuery dbSendQuery
@@ -49,16 +49,16 @@ add_vleemo_track_points <- function(local, remote) {
       dbClearResult(),
     add = TRUE
   )
-  "SELECT
-  t.id, s.scheme, tt.scheme_id, tt.track_id,
-  SQRT(POWER(t.x_max - t.x_min, 2) + POWER(t.x_max - t.x_min, 2)) AS diagonal
+  "SELECT t.id, s.scheme, tt.scheme_id, tt.track_id
 FROM track_bbox AS t
 INNER JOIN track_time AS tt ON t.id = tt.id
 INNER JOIN scheme AS s ON tt.scheme_id = s.id
 LEFT JOIN track_equal_time AS c ON t.id = c.track_id
-WHERE c.track_id IS NULL" |>
-    dbGetQuery(conn = local) |>
-    arrange(-.data$diagonal) -> track_id
+WHERE
+  c.track_id IS NULL AND t.convex_hull > t.length AND t.z_max > t.z_min + 10
+ORDER BY t.z_max, t.z_min
+LIMIT 10" |>
+    dbGetQuery(conn = local) -> track_id
   cli_progress_bar(
     name = "add missing vleemo track points", total = nrow(track_id)
   )
