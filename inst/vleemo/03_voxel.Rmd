@@ -1,0 +1,851 @@
+# Analyse op basis van voxels
+
+## Analyse rond de windmolens
+
+Een voxel is het driedimensionale equivalent van een pixel.
+Het is een balk met bepaalde breedte, lengte en hoogte.
+Voor de eenvoud definiëren we de voxel als een kubus met zijde `r params$voxel_size`.
+
+Rond elke windmolen creëren we een raster van 21 voxels in elke richting.
+Per voxel tellen we het aantal tracks dat door de voxel gaat.
+Het aantal tracks per voxel is dan een maat voor de activiteit van vogels in de voxel.
+Onze hypothese is dat de activiteit van de vogels afhangt van de positie ten opzicht van de windmolen en van de windrichting.
+Om rekening te houden met de windrichting kozen we om de vogeltracks te roteren rond de positie van de windmodel zodat alle geroteerde tracks noordenwind hebben.
+Een track in noordwest richting bij westenwind zal na de rotatie een track in noordoost richting bij noordenwind zijn.
+We centreren het voxelgrid op de voet van de windmolen.
+Een positieve y-waarde is dan het gebied windafwaarts van de windmolen.
+
+We berekenen het voxelgrid rond alle windmolens in de buurt van de radar.
+We weerhouden enkel de windmolens waar de som van het aantal tracks per voxel over alle voxels minstens 10% van de windmolen met het hoogste aantal bedraagt (fig. \@ref(fig:voxel-windmill-gebruikt)).
+De windmolen in de figuur zijn alle windmolens beschikbaar in OpenStreetMap in de omgeving van de Antwerpse haven.
+
+```{r voxel-create, eval = !file.exists("voxel_raw.rds")}
+windmill_voxel(
+  local = local, max_distance = sqrt(2) * params$voxel_size * 11,
+  voxel_size = rep(params$voxel_size, 3)
+) |>
+  mutate(
+    zs = .data$z - min(.data$z) + 1,
+    across(c("x", "y", "z"), ~.x * params$voxel_size)
+  ) |>
+  group_by(.data$windmill) |>
+  mutate(total = sum(.data$n)) |>
+  ungroup() |>
+  filter(.data$total >= 0.1 * max(.data$total)) |>
+  mutate(windmill = factor(.data$windmill)) |>
+  select(-"total") |>
+  saveRDS("voxel_raw.rds")
+```
+
+```{r voxel-raw-read}
+voxel <- readRDS("voxel_raw.rds")
+```
+
+```{r voxel-windmill}
+dbReadTable(local, "windmill") -> windmill
+```
+
+```{r voxel-windmill-gebruikt, fig.cap = "Gebruikte windmolens voor analyse met aanduiding van de regio van het voxelraster.", fig.height = 5}
+voxel |>
+  group_by(.data$windmill) |>
+  summarise(totaal = sum(.data$n)) |>
+  left_join(x = windmill, by = c("id" = "windmill")) |>
+  mutate(gebruikt = !is.na(.data$totaal)) |>
+  st_as_sf(coords = c("x", "y"), crs = 31370) -> gebruikt
+gebruikt |>
+  filter(.data$gebruikt) |>
+  transmute(
+    bb = map(.data$geometry, st_bbox) |>
+      map(~.x + c(-1, -1, 1, 1) * 10.5 * params$voxel_size) |>
+      map(st_as_sfc)
+  ) -> windmill_bb
+do.call(c, windmill_bb$bb) |>
+  st_as_sf(crs = 31370) -> windmill_bb
+gebruikt |>
+  st_buffer(1000) |>
+  st_transform(crs = 4267) |>
+  st_bbox() |>
+  osm_tile(extra_zoom = 1) -> osm_raw_tile
+gebruikt |>
+  st_transform(crs = 4267) |>
+  ggplot() +
+  pmap(osm_raw_tile, annotation_raster, interpolate = FALSE) +
+  annotate(
+    "text", Inf, -Inf, label = "\U00a9 OpenStreetMap contributors", vjust = 0,
+    hjust = 1, size = 2, colour = "black"
+  ) +
+  geom_sf(data = windmill_bb, fill = NA, colour = inbo_hoofd) +
+  geom_sf(aes(colour = gebruikt)) +
+  theme(axis.title = element_blank())
+```
+
+In figuur \@ref(fig:voxel-raw) tonen we de som over alle relevant windmolens.
+Elke deelfiguur toont een horizontale snede op de verschillende hoogtes.
+De meeste activiteit speelt zich af tussen 270 en 450 m.
+Dat is een zone boven het rotorvlak van de windmolens.
+Eventuele andere patronen in de figuur zijn minder duidelijk door het sterke verschil in activiteit tussen de verschillende hoogtes.
+
+```{r voxel-raw, fig.cap = "Overzicht van het totaal aantal tracks per voxel over alle geselecteerde windmodels. In oranje geven we de positie van de mast en rotor weer in 2 dimensies weer. De deelfiguren geven de verschillende hoogtes weer.", fig.height = 7}
+voxel |>
+  group_by(.data$x, .data$y, .data$z) |>
+  summarise(n = sum(.data$n), .groups = "drop") |>
+  ggplot(aes(x = x, y = y, fill = n)) +
+  geom_raster() +
+  annotate(
+    geom = "line", x = c(-0.5, 0.5) * params$rotor_diameter, y = 0,
+    colour = inbo_palette(2)[2]
+  ) +
+  annotate(geom = "point", x = 0, y = 0, colour = inbo_palette(2)[2]) +
+  coord_equal() +
+  facet_wrap(~z, ncol = 4) +
+  theme(axis.title = element_blank())
+```
+
+```{r voxel-model-prepare}
+voxel |>
+  distinct(.data$x, .data$y) -> mesh_loc
+mesh <- fm_mesh_2d_inla(mesh_loc)
+spde <- inla.spde2.pcmatern(
+  mesh = mesh, prior.range = c(2 * params$voxel_size, 0.01),
+  prior.sigma = c(1, 0.01)
+)
+xyz <- inla.spde.make.index(
+  "xyz", n.spde = spde$n.spde, n.group = max(voxel$zs), group = voxel$zs
+)
+voxel |>
+  select("x", "y") |>
+  as.matrix() |>
+  inla.spde.make.A(
+    mesh = mesh, group = voxel$zs, n.group = max(voxel$zs)
+  ) -> xyz_a
+voxel_stack_z <- inla.stack(
+  data = list(n = voxel$n), A = list(1, xyz_a),
+  effects = list(
+    voxel |>
+      transmute(intercept = 1, .data$windmill, .data$zs),
+    xyz
+  )
+)
+```
+
+```{r voxel-model-fit, eval = !file.exists("voxel_model.rds")}
+inla(
+  n ~ -1 + intercept + f(windmill, model = "iid") + f(zs, model = "rw2") +
+    f(
+      xyz, model = spde, group = xyz.group, control.group = list(model = "ar1")
+    ),
+  family = "poisson", data = inla.stack.data(voxel_stack_z, spde = spde),
+  control.predictor = list(
+    A = inla.stack.A(voxel_stack_z), compute = TRUE
+  ),
+  control.compute = list(waic = TRUE, config = TRUE), verbose = FALSE
+) |>
+  saveRDS(file = "voxel_model.rds")
+```
+
+```{r voxel-model-read}
+voxel_model <- readRDS("voxel_model.rds")
+```
+
+```{r voxel-model-hyperpar}
+range_estimate <- format_ci(
+  estimate = voxel_model$summary.hyperpar["Range for xyz", "mean"],
+  lcl = voxel_model$summary.hyperpar["Range for xyz", "0.025quant"],
+  ucl = voxel_model$summary.hyperpar["Range for xyz", "0.975quant"]
+)
+sigma_estimate <- format_ci(
+  estimate = voxel_model$summary.hyperpar["Stdev for xyz", "mean"] ^ 2,
+  lcl = voxel_model$summary.hyperpar["Stdev for xyz", "0.025quant"] ^ 2,
+  ucl = voxel_model$summary.hyperpar["Stdev for xyz", "0.975quant"] ^ 2
+)
+rho_estimate <- format_ci(
+  estimate = voxel_model$summary.hyperpar["GroupRho for xyz", "mean"],
+  lcl = voxel_model$summary.hyperpar["GroupRho for xyz", "0.025quant"],
+  ucl = voxel_model$summary.hyperpar["GroupRho for xyz", "0.975quant"]
+)
+prec2var <- function(x) {
+  1 / x
+}
+inla.tmarginal(
+  prec2var, voxel_model$marginals.hyperpar[["Precision for windmill"]] 
+) |>
+  inla.zmarginal(silent = TRUE) -> z
+sigma_windmill_estimate <- format_ci(
+  z$mean, lcl = z$quant0.025, ucl = z$quant0.975
+)
+inla.tmarginal(
+  prec2var, voxel_model$marginals.hyperpar[["Precision for zs"]] 
+) |>
+  inla.zmarginal(silent = TRUE) -> z
+sigma_height_estimate <- format_ci(
+  z$mean, lcl = z$quant0.025, ucl = z$quant0.975
+)
+```
+
+Om beter zicht te krijgen op de patronen, modelleren we ze met behulp van een statistisch model.
+De activiteit $Y_{ixyz}$ in voxel $xy$ in laag $z$ rond windmodel $i$ volgens een Poisson verdeling met gemiddelde $\mu_{ixyz}$ \@ref(eq:Y).
+Dit gemiddelde $\mu_{ixyz}$ is met een $\log$ link gekoppeld aan de lineaire predictor $\eta_{ixyz}$ \@ref(eq:link).
+De lineaire predictor $\eta_{ixyz}$ hangt af van het globaal gemiddelde $\beta_0$, het effect $b_i$ van de windmolen $i$, het effect van de hoogte $b_z$ en het gemiddelde effect $\xi(xy,z)$ van de voxel $xy$ in laag $z$.
+We veronderstellen dat het windmolen effect uit een Gaussianse verdeling met gemiddelde $0$ en standaard afwijking $\sigma_w$ \@ref(eq:windmill).
+Het effect van de hoogte modelleren we als een tweede orde toevalsbeweging (second order random walk) \@ref(eq:hoogte).
+Het effect van de voxel $\xi(xy,z)$ modelleren we als horizontale lagen die een Gaussian Markov Random Field (GMRF) volgen waarbij twee boven elkaar gelegen lagen een autogressive model van order 1 volgen \@ref(eq:field).
+Het model schat de correlatie tussen twee boven elkaar gelegen lagen op `r rho_estimate`.
+Het GMRF zorgt voor een ruimtelijke autocorrelatie in het horizontale vlak volgens een Matern covariantie functie.
+
+```{=tex}
+\begin{equation}
+  Y_{ixyz} \sim \mathcal{P}\mbox{oisson}(\mu_{ixyz}) (\#eq:Y)
+\end{equation}
+```
+```{=tex}
+\begin{equation}
+  \log(\mu_{ixyz}) = \eta_{ixyz} (\#eq:link)
+\end{equation}
+```
+```{=tex}
+\begin{equation}
+  \eta_{ixyz} = \beta_0 + b_i + b_z + \xi(xy,z)(\#eq:eta)
+\end{equation}
+```
+```{=tex}
+\begin{equation}
+  b_i \sim \mathcal{N}(0, \sigma_w)(\#eq:windmill)
+\end{equation}
+```
+```{=tex}
+\begin{equation}
+  \Delta_z^2 = (b_{z + 1} - b_z) - (b_z - b_{z - 1}) \\
+  \Delta_z^2 \sim \mathcal{N}(0, \sigma_z)(\#eq:hoogte)
+\end{equation}
+```
+```{=tex}
+\begin{equation}
+  \xi(xy,z) = a \xi(xy, z - 1) + w(xy, z)(\#eq:field)
+\end{equation}
+```
+In figuur \@ref(fig:voxel-fitted-windmill) geven we het effect de windmolen.
+Het verschil tussen de windmolen met hoogste en laagste activiteit is begrenst omdat we enkel de windmolens gebruiken die minstens 10% van de windmolen met hoogste activiteit hebben.
+De positie van de radar zal voor een belangrijk deel dit effect verklaren.
+De radar heeft immers een beperkt bereik.
+Afhankelijk van de afstand tussen de radar en de windmolen zal de radar meer of minder tracks kunnen waarnemen.
+
+```{r voxel-fitted-windmill, fig.cap = "Gemiddelde activiteit per windmolen. Relatief ten opzichte van de globaal gemiddelde activiteit."}
+voxel_model$summary.random$windmill |>
+  inner_join(windmill, by = c("ID" = "id")) |>
+  mutate(
+    windmolen = reorder(.data$ID, .data$mean) |>
+      as.integer(),
+    operator = replace_na(.data$operator, "onbekend") |>
+      factor()
+  ) |>
+  ggplot(aes(x = windmolen, y = mean)) +
+  geom_hline(yintercept = 0, linetype = 3) +
+  stat_fan(aes(link_sd = sd), geom = "rect") +
+  scale_y_continuous(
+    "relatieve\nactiviteit", breaks = change_breaks(n = 3),
+    labels = change_labels
+  ) +
+  coord_flip() +
+  theme(axis.text.y = element_blank(), axis.ticks.y = element_blank())
+```
+
+Zoals we reeds konden verwachten op basis van figuur \@ref(fig:voxel-raw), stellen we een sterk effect volgens de hoogte vast (fig. \@ref(fig:voxel-fitted-height)).
+Tussen 200 en 600 m hoogte stellen we een hoger dan gemiddelde activiteit vast met een piek rond 400 m.
+Onder de 100 m stellen we een sterke afnamen van de activiteit vast.
+Dit is mogelijk te wijten aan beperkingen qua zichtbaarheid door de radar.
+
+```{r voxel-fitted-height, fig.cap = "Gemiddelde activiteit in functie van de hoogte. Relatief ten opzichte van de globaal gemiddelde activiteit."}
+delta_label <- function(x) {
+  sprintf("%.1f%%", 100 - 100 * exp(x))
+}
+voxel_model$summary.random$zs |>
+  mutate(hoogte = .data$ID * params$voxel_size) |>
+  ggplot(aes(x = hoogte, y = mean)) +
+  geom_hline(yintercept = 0, linetype = 2, colour = inbo_hoofd) +
+  geom_hline(
+    yintercept = c(-1, 1) * log(params$threshold), linetype = 3,
+    colour = inbo_hoofd
+  ) +
+  annotate(
+    geom = "text", x = Inf, y = c(0, -1, 1) * abs(log(params$threshold)),
+    label = c("referentie", "belangrijke afname", "belangrijke toename"),
+    vjust = c(-0.1, 1.1, -0.1), hjust = 1, colour = inbo_hoofd, size = 2
+  ) +
+  stat_fan(aes(link_sd = sd)) +
+  scale_y_continuous(
+    "relatieve\nactiviteit", breaks = change_breaks(n = 5), labels = delta_label
+  )
+```
+
+Ten slotte hebben we nog het effect van de voxels, na de correctie voor het effect van de windmolen en de hoogte.
+Figuur \@ref(fig:voxel-fitted-field) toont twee verschillende patronen.
+Boven 330 m zien we relatief weinig verschillen tussen verschillende posities in de horizontale vlakken.
+Tussen 90 en 210 m stellen we een sterk patroon van in de horizontale lagen.
+Vlakbij de windmolen is de activiteit beduidend lager dan rond de windmolen.
+Merk op dat dit bereik min of meer overeenkomt met het rotorvlak.
+De zone met lagere activiteit lijkt windafwaarts van de windmolen (bovenrand van de figuur) iets groter te zijn dan windopwaarts van de windmolen.
+
+```{r voxel-fitted-field, fig.cap = "Gemiddelde activiteit in de omgeving van een windmolen. Relatief ten opzichte van de globaal gemiddelde activiteit.", fig.height = 7.5}
+mesh$loc |>
+  data.frame() |>
+  list() |>
+  rep(max(voxel$zs)) |>
+  bind_rows() |>
+  mutate(
+    X3 = rep(unique(voxel$zs) * params$voxel_size, each = nrow(mesh$loc)),
+    X3 = .data$X3 + min(voxel$z) - params$voxel_size
+  ) |>
+  bind_cols(voxel_model$summary.random$xy) |>
+  filter(.data$X1 == floor(.data$X1)) |>
+  ggplot(aes(x = X1, y = X2, fill = `0.5quant`)) +
+  geom_raster() +
+  annotate(
+    geom = "line", x = c(-0.5, 0.5) * params$rotor_diameter, y = 0,
+    colour = inbo_palette(2)[2]
+  ) +
+  annotate(geom = "point", x = 0, y = 0, colour = inbo_palette(2)[2]) +
+  scale_fill_gradient2(
+    "relatieve\nactiviteit", breaks = change_breaks(n = 3),
+    labels = change_labels, limits = c(-1.7, 1.4)
+  ) +
+  coord_equal() +
+  facet_wrap(~X3, ncol = 4) +
+  theme(axis.title = element_blank())
+```
+
+## Vergelijkbare analyse in de omgeving van windmolens
+
+```{r voxel-alternative, eval = !file.exists("voxel_raw_alt.rds")}
+voxel |>
+  group_by(.data$windmill) |>
+  summarise(total = sum(.data$n)) |>
+  pull(.data$total) |>
+  max() -> voxel_max
+windmill_bb |>
+  st_buffer(dist = 11 * params$voxel_size) |>
+  st_union() -> inside_buffer
+saveRDS(inside_buffer, "voxel_inside_buffer.rds")
+st_buffer(inside_buffer, dist = 11 * params$voxel_size) |>
+  st_difference(inside_buffer) |>
+  st_sample(size = 2 * length(windmill_bb)) |>
+  st_as_sf(crs = 31370) |>
+  mutate(windmill = row_number()) -> alt_centre
+st_distance(alt_centre) |>
+  `diag<-`(Inf) -> alt_dist
+to_keep <- seq_len(nrow(alt_centre))
+while (
+  as.vector(min(alt_dist[to_keep, to_keep])) < sqrt(2) * 21 * params$voxel_size
+) {
+  which(
+    alt_dist[to_keep, to_keep] == min(alt_dist[to_keep, to_keep]),
+    arr.ind = TRUE
+  ) |>
+    min() -> to_remove
+  to_keep <- to_keep[-to_remove]
+}
+alt_centre |>
+  st_coordinates() |>
+  as.data.frame() |>
+  mutate(windmill = alt_centre$windmill) |>
+  slice(to_keep) -> alt_centre
+saveRDS(alt_centre, "voxel_control.rds")
+alt_centre |>
+  mutate(
+    voxel = map2(
+      .data$X, .data$Y,
+      ~voxel_around_centre(
+        local = local, centre = data.frame(x = .x, y = .y),
+        max_distance = sqrt(2) * params$voxel_size * 11,
+        voxel_size = rep(params$voxel_size, 3)
+      )
+    )
+  ) |>
+  select("windmill", "voxel") |>
+  mutate(windmill = factor(.data$windmill)) |>
+  unnest("voxel") |>
+  complete(.data$windmill, .data$x, .data$y, .data$z, fill = list(n = 0)) |>
+  mutate(
+    zs = .data$z - min(.data$z) + 1,
+    across(c("x", "y", "z"), ~.x * params$voxel_size)
+  ) |>
+  group_by(.data$windmill) |>
+  mutate(total = sum(.data$n)) |>
+  ungroup() |>
+  filter(.data$total >= 0.1 * voxel_max) |>
+  mutate(windmill = factor(.data$windmill)) |>
+  select(-"total") |>
+  saveRDS("voxel_raw_alt.rds")
+```
+
+```{r voxel-alternative-raw-read}
+voxel_alt <- readRDS("voxel_raw_alt.rds")
+inside_buffer <- readRDS("voxel_inside_buffer.rds")
+readRDS("voxel_control.rds") |>
+  mutate(
+    type = ifelse(
+      .data$windmill %in% voxel_alt$windmill, "controle",
+      "controle\nmet lage activiteit"
+    )
+  ) |>
+  st_as_sf(coords = c("X", "Y"), crs = 31370) -> alt_centre
+```
+
+Om na te gaan wat de mogelijke invloed van de windmolen is, herhalen we de analyse voor locaties zonder windmolen.
+We generen een set van aselecte punten in de omgeving van windmolen zodat de voxelrasters van de controleset dichtbij de windmolen zijn, zonder overlap tussen de voxelrasters (fig. \@ref(fig:voxel-alt-windmolen)).
+Ook hier weerhouden we enkel de controlepunten waarvan de activiteit minstens 10% bedraagt van de windmolen met hoogste activiteit.
+De controleset bestaat uit `r sum(alt_centre$type == "controle")` punten, terwijl de originele set uit `r sum(gebruikt$gebruikt)` punten bestaat.
+
+```{r voxel-alt-windmolen, fig.cap = "Aselecte controle punten nabij gebruikte windmolens. Kandidaat verwijst naar controle punten met te weinig activiteit.", fig.height = 5}
+alt_centre |>
+  transmute(
+    bb = map(.data$geometry, st_bbox) |>
+      map(~.x + c(-1, -1, 1, 1) * 10.5 * params$voxel_size) |>
+      map(st_as_sfc)
+  ) -> windmill_bb_alt
+do.call(c, windmill_bb_alt$bb) |>
+  st_as_sf(crs = 31370) |>
+  mutate(type = alt_centre$type) |>
+  bind_rows(
+    windmill_bb |>
+      mutate(type = "windmolen")
+  ) -> windmill_bb_alt
+gebruikt |>
+  mutate(type = ifelse(.data$gebruikt, "windmolen", "windmolen\nmet lage activiteit")) |>
+  bind_rows(alt_centre) |>
+  st_transform(crs = 4267) |>
+  ggplot() +
+  pmap(osm_raw_tile, annotation_raster, interpolate = TRUE) +
+  annotate(
+    "text", Inf, -Inf, label = "\U00a9 OpenStreetMap contributors", vjust = 0,
+    hjust = 1, size = 2, colour = "black"
+  ) +
+  geom_sf(data = windmill_bb_alt, fill = NA, aes(colour = type)) +
+  geom_sf(aes(colour = type)) +
+  theme(axis.title = element_blank())
+```
+
+Wanneer we naar de ruwe gegevens van de controleset kijken stellen we opnieuw een sterk effect van de hoogte vast (fig. \@ref(fig:voxel-raw-alt)).
+Om een betere vergelijking te kunnen maken, fitten we hetzelfde statistisch model aan de controleset.
+
+```{r voxel-raw-alt, fig.cap = "Overzicht van het totaal aantal tracks per voxel over willekeurige punten in de buurt van windmolen. De deelfiguren geven de verschillende hoogtes weer.", fig.height = 7}
+voxel_alt |>
+  group_by(.data$x, .data$y, .data$z) |>
+  summarise(n = sum(.data$n), .groups = "drop") |>
+  ggplot(aes(x = x, y = y, fill = n)) +
+  geom_raster() +
+  coord_equal() +
+  facet_wrap(~z, ncol = 4) +
+  theme(axis.title = element_blank())
+```
+
+```{r voxel-model-prepare-alt}
+xyz_alt <- inla.spde.make.index(
+  "xyz", n.spde = spde$n.spde, n.group = max(voxel_alt$zs), group = voxel_alt$zs
+)
+voxel_alt |>
+  select("x", "y") |>
+  as.matrix() |>
+  inla.spde.make.A(
+    mesh = mesh, group = voxel_alt$zs, n.group = max(voxel_alt$zs)
+  ) -> xyz_a_alt
+voxel_alt_stack_z <- inla.stack(
+  data = list(n = voxel_alt$n), A = list(1, xyz_a_alt),
+  effects = list(
+    voxel_alt |>
+      transmute(intercept = 1, .data$windmill, .data$zs),
+    xyz_alt
+  )
+)
+```
+
+```{r voxel-model-fit-alt, eval = !file.exists("voxel_model_alt.rds")}
+inla(
+  n ~ -1 + intercept + f(windmill, model = "iid") + f(zs, model = "rw2") +
+    f(
+      xyz, model = spde, group = xyz.group,
+      control.group = list(model = "ar1")
+    ),
+  family = "poisson", data = inla.stack.data(voxel_alt_stack_z, spde = spde),
+  control.predictor = list(
+    A = inla.stack.A(voxel_alt_stack_z), compute = TRUE
+  ),
+  control.compute = list(waic = TRUE, config = TRUE), verbose = FALSE
+) |>
+  saveRDS(file = "voxel_model_alt.rds")
+```
+
+```{r voxel-model-read-alt}
+voxel_model_alt <- readRDS("voxel_model_alt.rds")
+```
+
+In eerste instantie kijken we naar de hyperparameters van het model.
+Dit zijn de parameters die de variabiliteit van de verschillende componenten van het model bepalen.
+Bij de controleset stellen we minder sterke correlaties vast (tabel \@ref(tab:voxel-model-hyperpar-alt)).
+De correlatie tussen de horizontal lagen daalt van $0.90$ naar $0.79$.
+De afstand waarover de horizontale autocorrelatie een rol speelt daalt van 460 m naar 320 m.
+De sterke van de horizontale autocorrelatie halveert.
+De verschillen tussen de controle punten daalt met een derde.
+Enkel de variabiliteit van het hoogteeffect verdubbelt nagenoeg.
+Het hoogteeffect beschrijven we met een tweede orde toevalsbeweging.
+Een kleine variantie van een tweede orde toevalsbeweging zorg voor een geleidelijk patroon.
+Naarmate de variantie groter is, is het patroon flexibeler.
+
+```{r voxel-model-hyperpar-alt}
+range_estimate_alt <- format_ci(
+  estimate = voxel_model_alt$summary.hyperpar["Range for xyz", "mean"],
+  lcl = voxel_model_alt$summary.hyperpar["Range for xyz", "0.025quant"],
+  ucl = voxel_model_alt$summary.hyperpar["Range for xyz", "0.975quant"]
+)
+sigma_estimate_alt <- format_ci(
+  estimate = voxel_model_alt$summary.hyperpar["Stdev for xyz", "mean"] ^ 2,
+  lcl = voxel_model_alt$summary.hyperpar["Stdev for xyz", "0.025quant"] ^ 2,
+  ucl = voxel_model_alt$summary.hyperpar["Stdev for xyz", "0.975quant"] ^ 2
+)
+rho_estimate_alt <- format_ci(
+  estimate = voxel_model_alt$summary.hyperpar["GroupRho for xyz", "mean"],
+  lcl = voxel_model_alt$summary.hyperpar["GroupRho for xyz", "0.025quant"],
+  ucl = voxel_model_alt$summary.hyperpar["GroupRho for xyz", "0.975quant"]
+)
+inla.tmarginal(
+  prec2var, voxel_model_alt$marginals.hyperpar[["Precision for windmill"]] 
+) |>
+  inla.zmarginal(silent = TRUE) -> z
+sigma_windmill_estimate_alt <- format_ci(
+  z$mean, lcl = z$quant0.025, ucl = z$quant0.975
+)
+inla.tmarginal(
+  prec2var, voxel_model_alt$marginals.hyperpar[["Precision for zs"]] 
+) |>
+  inla.zmarginal(silent = TRUE) -> z
+sigma_height_estimate_alt <- format_ci(
+  z$mean, lcl = z$quant0.025, ucl = z$quant0.975
+)
+tribble(
+  ~parameter, ~windmodel, ~controle,
+  "Correlatie tussen horizontale lagen", rho_estimate, rho_estimate_alt,
+  "Afstand ruimtelijke autocorrelatie", range_estimate, range_estimate_alt,
+  "Variantie ruimtelijke autocorrelatie", sigma_estimate,
+  sigma_estimate_alt,
+  "Variantie punten", sigma_windmill_estimate,
+  sigma_windmill_estimate_alt,
+  "Variantie hoogte", sigma_height_estimate, sigma_height_estimate_alt
+) |>
+  kable(
+    caption = "Verschil in hyperparameters tussen de modellen.",
+    align = "lcc"
+  )
+```
+
+```{r voxel-post-samp, eval = !file.exists("voxel_post_samp.rds")}
+n_sim <- 1000
+inla.posterior.sample(n_sim, voxel_model) |>
+  map("latent") |>
+  map2(sprintf("sim_%04i", seq_len(n_sim)), `colnames<-`) |>
+  map_dfc(as.data.frame) |>
+  rownames_to_column(var = "parameter") |>
+  mutate(omgeving = "windmolen") |>
+  bind_rows(
+    inla.posterior.sample(n_sim, voxel_model_alt) |>
+      map("latent") |>
+      map2(sprintf("sim_%04i", seq_len(n_sim)), `colnames<-`) |>
+      map_dfc(as.data.frame) |>
+      rownames_to_column(var = "parameter") |>
+      mutate(omgeving = "controle")
+  ) |>
+  mutate(omgeving = factor(.data$omgeving)) |>
+  saveRDS("voxel_post_samp.rds")
+```
+
+```{r voxel-post-samp-read}
+post_samp <- readRDS("voxel_post_samp.rds")
+```
+
+```{r voxel-post-samp-intercept}
+post_samp |>
+  filter(str_detect(.data$parameter, "intercept")) |>
+  select(-"parameter") |>
+  pivot_longer(
+    starts_with("sim"), names_to = "sim", values_to = "intercept"
+  ) -> post_intercept
+post_intercept |>
+  pivot_wider(names_from = "omgeving", values_from = "intercept") |>
+  summarise(
+    verschil = mean(.data$windmolen - .data$controle),
+    sd = sd(.data$windmolen - .data$controle)
+  ) -> delta
+format_ci(
+  estimate = delta$verschil, se = delta$sd, link = "log", change = TRUE,
+  percent = TRUE
+) -> verschil
+```
+
+```{r voxel-post-samp-height}
+post_samp |>
+  filter(str_detect(.data$parameter, "zs")) |>
+  mutate(
+    hoogte = str_remove(.data$parameter, "zs:") |>
+      as.integer(),
+    hoogte = .data$hoogte * params$voxel_size
+  ) |>
+  pivot_longer(
+    starts_with("sim"), names_to = "sim", values_to = "height"
+  ) |>
+  select(-"parameter") -> post_height
+```
+
+```{r voxel-post-samp-field}
+gproj <- inla.mesh.projector(mesh, loc = as.matrix(mesh_loc))
+post_samp |>
+  filter(str_detect(.data$parameter, "xyz")) |>
+  mutate(
+    parameter = str_remove(.data$parameter, "xyz:") |>
+      as.integer(),
+    xy = xyz$xyz[.data$parameter],
+    hoogte = (xyz$xyz.group[.data$parameter] - 1) * params$voxel_size +
+      min(voxel$z)
+  ) |>
+  select(-"parameter") |>
+  pivot_longer(starts_with("sim_"), names_to = "sim", values_to = "field") |>
+  inner_join(post_intercept, by = c("omgeving", "sim")) |>
+  inner_join(post_height, by = c("omgeving", "hoogte", "sim")) |>
+  inner_join(
+    which(gproj$proj$A > 1e-4, arr.ind = TRUE) |>
+      as.data.frame(),
+    by = c("xy" = "col")
+  ) |>
+  inner_join(
+    mesh_loc |>
+      mutate(row = row_number()),
+    by = "row"
+  ) |>
+  transmute(
+    .data$sim, .data$hoogte, .data$x, .data$y, .data$omgeving,
+    estimate = .data$intercept + .data$height + .data$field, .data$field
+  ) -> post_field
+post_field |>
+  select(-"field") |>
+  pivot_wider(names_from = "omgeving", values_from = "estimate") |>
+  group_by(.data$hoogte, .data$x, .data$y) |>
+  summarise(
+    median = quantile(.data$windmolen - .data$controle, probs = 0.5),
+    lcl = quantile(.data$windmolen - .data$controle, probs = 0.1),
+    ucl = quantile(.data$windmolen - .data$controle, probs = 0.9),
+    .groups = "drop"
+  ) |>
+  mutate(
+    effect = classification(
+      .data$lcl, .data$ucl, threshold = log(params$threshold)
+    )
+  ) -> field_control
+post_field |>
+  select(-"estimate") |>
+  pivot_wider(names_from = "omgeving", values_from = "field") |>
+  group_by(.data$hoogte, .data$x, .data$y) |>
+  summarise(
+    median = quantile(.data$windmolen - .data$controle, probs = 0.5),
+    lcl = quantile(.data$windmolen - .data$controle, probs = 0.1),
+    ucl = quantile(.data$windmolen - .data$controle, probs = 0.9),
+    .groups = "drop"
+  ) |>
+  mutate(
+    effect = classification(
+      .data$lcl, .data$ucl, threshold = log(params$threshold)
+    )
+  ) -> field_control2
+```
+
+Bij de windmolen stellen we gemiddelde een lagere activiteit vast (`r verschil`, fig. \@ref(fig:voxel-fitted-windmill-alt)).
+
+```{r voxel-fitted-windmill-alt, fig.cap = "Gemiddelde activiteit per locatie."}
+breaks <- c(0.1, 0.2, 0.5, 1, 2, 5, 10)
+post_samp |>
+  filter(str_detect(.data$parameter, "intercept")) |>
+  select(-"parameter") |>
+  pivot_longer(starts_with("sim"), names_to = "sim", values_to = "intercept") |>
+  inner_join(
+    post_samp |>
+      filter(str_detect(.data$parameter, "windmill")) |>
+      pivot_longer(starts_with("sim"), names_to = "sim", values_to = "locatie"),
+    by = c("omgeving", "sim")
+  ) |>
+  group_by(.data$omgeving, .data$parameter) |>
+  summarise(
+    schatting = mean(.data$intercept + .data$locatie),
+    sd = sd(.data$intercept + .data$locatie), .groups = "drop"
+  ) |>
+  mutate(
+    parameter = interaction(.data$omgeving, .data$parameter) |>
+      reorder(.data$schatting)
+  ) |>
+  ggplot(aes(x = parameter, y = schatting)) +
+  stat_fan(aes(link_sd = sd, fill = omgeving), geom = "rect") +
+  scale_x_discrete("locatie") +
+  scale_y_continuous(
+    "gemiddelde activiteit", breaks = log(breaks), labels = breaks
+  ) +
+  coord_flip() +
+  theme(axis.text.y = element_blank(), axis.ticks.y = element_blank())
+```
+
+Het patroon van het hoogte effect verschilt eveneens (fig. \@ref(fig:voxel-fitted-height-alt)).
+Rondom windmolen lijkt er een lagere activiteit te zijn onder 250 m en een hogere activiteit daarboven.
+
+```{r voxel-fitted-height-alt, fig.cap = "Gemiddelde activiteit in functie van de hoogte. Relatief ten opzichte van de globaal gemiddelde activiteit."}
+post_samp |>
+  filter(str_detect(.data$parameter, "zs")) |>
+  mutate(
+    hoogte = str_remove(.data$parameter, "zs:") |>
+      as.integer(),
+    hoogte = .data$hoogte * params$voxel_size
+  ) |>
+  pivot_longer(starts_with("sim"), names_to = "sim", values_to = "effect") |>
+  group_by(.data$omgeving, .data$hoogte) |>
+  summarise(
+    schatting = mean(.data$effect), sd = sd(.data$effect), .groups = "drop"
+  ) |>
+  ggplot(aes(x = hoogte, y = schatting)) +
+  geom_hline(yintercept = 0, linetype = 2, colour = inbo_hoofd) +
+  geom_hline(
+    yintercept = c(-1, 1) * log(params$threshold), linetype = 3,
+    colour = inbo_hoofd
+  ) +
+  annotate(
+    geom = "text", x = Inf, y = c(0, -1, 1) * abs(log(params$threshold)),
+    label = c("referentie", "belangrijke afname", "belangrijke toename"),
+    vjust = c(-0.1, 1.1, -0.1), hjust = 1, colour = inbo_hoofd, size = 2
+  ) +
+  stat_fan(aes(link_sd = sd, fill = omgeving)) +
+  scale_y_continuous(
+    "relatieve activiteit", breaks = change_breaks(n = 5), labels = delta_label
+  )
+```
+
+Het verschil bij de voxel is spectaculair.
+Waar we rond de windmolens op lage hoogte sterke patronen vast stellen (fig. \@ref(fig:voxel-fitted-field)), zijn deze bij de controlepunten slechts in beperkte mate aanwezig (fig. \@ref(fig:voxel-fitted-field-alt)).
+De kleurgradient in beide figuren gebruikt dezelfde kleurschaal zodat we ze gemakkelijk met elkaar kunnen vergelijken.
+
+```{r voxel-fitted-field-alt, fig.cap = "Gemiddelde activiteit in de omgeving van een controlepunt. Relatief ten opzichte van de globaal gemiddelde activiteit.", fig.height = 7.5}
+mesh$loc |>
+  data.frame() |>
+  list() |>
+  rep(max(voxel_alt$zs)) |>
+  bind_rows() |>
+  mutate(
+    X3 = rep(unique(voxel_alt$zs) * params$voxel_size, each = nrow(mesh$loc)),
+    X3 = .data$X3 + min(voxel_alt$z) - params$voxel_size
+  ) |>
+  bind_cols(voxel_model_alt$summary.random$xy) |>
+  filter(.data$X1 == floor(.data$X1)) |>
+  ggplot(aes(x = X1, y = X2, fill = `0.5quant`)) +
+  geom_raster() +
+  scale_fill_gradient2(
+    "relatieve\nactiviteit", breaks = change_breaks(n = 3),
+    labels = change_labels, limits = c(-1.7, 1.4)
+  ) +
+  coord_equal() +
+  facet_wrap(~X3, ncol = 4) +
+  theme(axis.title = element_blank())
+```
+
+## Relatief verschil tussen beide modellen
+
+In deze sectie kijken we naar de verschillende in voorspelde waarde tussen beide modellen.
+Kijken we enkel naar de globale verschillen dan blijkt de activiteit rond windmodels gemiddelde `r verschil` te bedragen van de activiteit rond de nabijgelegen controlepunten.
+
+Boven 300 m stellen we geen significant verschil in relevatieve activiteit vast (fig. \@ref(fig:voxel-fitted-height-control)).
+Onder 240 m stellen we rond de windmolens een sterke afname van de relatieve activiteit vast.
+
+```{r voxel-fitted-height-control, fig.cap = "Verschil in relatieve activiteit per hoogte rond windmolens versus rond controlepunten in de omgeving van windmolens."}
+post_height |>
+  inner_join(post_intercept, by = c("omgeving", "sim")) |>
+  transmute(
+    .data$omgeving, .data$hoogte, .data$sim,
+    effect = .data$intercept + .data$height
+  ) |>
+  pivot_wider(names_from = "omgeving", values_from = "effect") |>
+  group_by(.data$hoogte) |>
+  summarise(
+    mean = mean(.data$windmolen - .data$controle),
+    sd = sd(.data$windmolen - .data$controle)
+  ) |>
+  ggplot(aes(x = hoogte, y = mean)) +
+  geom_hline(yintercept = 0, linetype = 2, colour = inbo_hoofd) +
+  geom_hline(
+    yintercept = c(-1, 1) * log(params$threshold), linetype = 3,
+    colour = inbo_hoofd
+  ) +
+  annotate(
+    geom = "text", x = Inf, y = c(0, -1, 1) * abs(log(params$threshold)),
+    label = c("referentie", "belangrijke afname", "belangrijke toename"),
+    vjust = c(-0.1, 1.1, -0.1), hjust = 1, colour = inbo_hoofd, size = 2
+  ) +
+  stat_fan(aes(link_sd = sd)) +
+  scale_y_continuous(
+    "relatief verschil in activiteit", breaks = change_breaks(n = 4),
+    labels = change_labels
+  )
+```
+
+Aangezien de ruimtelijke patronen rond de windmolens (fig. \@ref(fig:voxel-fitted-field)) en controle (fig. \@ref(fig:voxel-fitted-field-alt)) sterk van elkaar verschillen, hoeft het niet te verbazen dat het verschil tussen beide patronen (fig. \@ref(fig:voxel-fitted-field-controle2)) op zich eveneens een sterk patroon vertoont.
+Boven 300 m is weinig verschil.
+Tussen 90 m en 240 m stellen we een sterke afname in relatieve activiteit vast.
+In figuur \@ref(fig:voxel-fitted-field-controle2-effect) hebben de de verschillen opgedeeld in een aantal klassen.
+We verwijzen naar @effectclass voor meer uitleg over deze indeling.
+De rode zones geven de gebieden met een statische significante afname weer, de groene zones een statisch significante toename.
+
+```{r voxel-fitted-field-controle2, fig.cap = "Relatief verschil in gemiddelde activiteit rond windmolen versus de controle.", fig.height = 7.5}
+field_control2 |>
+  ggplot(aes(x = x, y = y, fill = median)) +
+  geom_raster() +
+  scale_fill_gradient2(
+    "relatieve\nactiviteit", breaks = change_breaks(n = 3),
+    labels = change_labels, limits = c(-1.7, 1.4)
+  ) +
+  coord_equal() +
+  facet_wrap(~hoogte, ncol = 4) +
+  theme(axis.title = element_blank())
+```
+
+```{r voxel-fitted-field-controle2-effect, fig.cap = "Classificatie relatief verschil in gemiddelde activiteit rond windmolen versus de controle.", fig.height = 7.5}
+ef_labels <- c(
+  "++" = "sterke toename", "+" = "toename", "+~" = "matige toename",
+  "~" = "stabiel", "-~" = "matige afname", "-" = "afname",
+  "--" = "sterke afname", "?+" = "mogelijke toename", "?-" = "mogelijke afname",
+  "?" = "onzeker"
+)
+field_control2 |>
+  ggplot(aes(x = x, y = y, fill = effect)) +
+  geom_raster() +
+  scale_effect(labels = ef_labels) +
+  coord_equal() +
+  facet_wrap(~hoogte, ncol = 4) +
+  theme(axis.title = element_blank())
+```
+
+In figuur \@ref(fig:voxel-fitted-field-controle) geven we het verschil wanneer rekening houden met alle effecten, behalve dat van de individuele windmolen.
+We combineren met andere woorden het globaal gemiddelde, het hoogteeffect en het ruimtelijke patroon.
+Op lage hoge is bijna overal een sterke afname van de relatieve activiteit (fig. \@ref(fig:voxel-fitted-field-controle-effect)).
+Het effect van de positie van de windmolen ter hoogte van het rotorvlak is nog steeds zichtbaar.
+
+```{r voxel-fitted-field-controle, fig.cap = "Relatief verschil in gemiddelde activiteit rond windmolen versus de controle.", fig.height = 7.5}
+field_control |>
+  ggplot(aes(x = x, y = y, fill = median)) +
+  geom_raster() +
+  scale_fill_gradient2(
+    "relatieve\nactiviteit", breaks = change_breaks(n = 3),
+    labels = change_labels, limits = c(-3.8, 2)
+  ) +
+  coord_equal() +
+  facet_wrap(~hoogte, ncol = 4) +
+  theme(axis.title = element_blank())
+```
+
+```{r voxel-fitted-field-controle-effect, fig.cap = "Classificatie relatief verschil in gemiddelde activiteit rond windmolen versus de controle.", fig.height = 7.5}
+field_control |>
+  ggplot(aes(x = x, y = y, fill = effect)) +
+  geom_raster() +
+  scale_effect(labels = ef_labels) +
+  coord_equal() +
+  facet_wrap(~hoogte, ncol = 4) +
+  theme(axis.title = element_blank())
+```

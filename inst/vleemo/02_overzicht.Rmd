@@ -1,0 +1,687 @@
+# Classificatie van tracks
+
+```{r overzicht-periode}
+"SELECT MIN(start) AS start, MAX(start) AS end FROM track_time"  |>
+  dbGetQuery(conn = local) |>
+  mutate(
+    across(
+      everything(), ~as.POSIXct(.) |>
+        floor_date("month") |>
+        format("%B %Y")
+    )
+  ) -> periode
+```
+
+De software bij de radar geeft een automatische classificatie van de ruwe tracks.
+In tabel \@ref(tab:overzicht-classification) geven we een overzicht van het aantal ruwe tracks per categorie na automatische classificatie.
+Het betreft de ruwe tracks van `r periode$start` tot en met `r periode$end`.
+
+```{r overzicht-classification}
+"SELECT
+  s.common_name AS klasse, s2.common_name AS soort, s2.relevant,
+  t.duration, t.speed * 5 AS speed,
+  SUM(t.n) AS aantal
+FROM track_available AS t
+LEFT JOIN species AS s ON t.classification_id = s.id
+LEFT JOIN species AS s2 ON t.species_id = s2.id
+GROUP BY s.common_name, t.species_id, t.duration, t.speed" |>
+  dbGetQuery(conn = local) -> indeling
+indeling |>
+  group_by(.data$klasse) |>
+  summarise(aantal = sum(.data$aantal)) |>
+  arrange(desc(.data$aantal)) |>
+  mutate(
+    aandeel = sprintf("%.1f%%", 100 * .data$aantal / sum(.data$aantal))
+  ) |>
+  kable(
+    caption =
+    "Aantal beschikbare tracks opgedeeld volgens de automatische classificatie.
+Aandeel: verhouding op totaal",
+    align = "lrr"
+  )
+```
+
+Een kleine fractie van de ruwe tracks hebben we in het veld gecontroleerd (tab. \@ref(tab:overzicht-manueel)).
+In tabel \@ref(tab:overzicht-soort) geven we een overzicht van de waarnemingen.
+Tenslotte geeft tabel \@ref(tab:overzicht-manueel2) per automatische categorie het aantal manueel gecontroleerde tracks dat effectief vogels zijn.
+
+```{r overzicht-manueel}
+indeling |>
+  group_by(
+    .data$klasse,
+    manueel = is.na(.data$soort) |>
+      factor(c(TRUE, FALSE), c("automatisch", "manueel"))
+  ) |>
+  summarise(n = sum(.data$aantal), .groups = "drop") |>
+  pivot_wider(names_from = "manueel", values_from = "n") |>
+  mutate(
+    aandeel = sprintf(
+      "%.5f%%", 100 * .data$manueel / (.data$manueel + automatisch)
+    )
+  ) |>
+  arrange(desc(.data$manueel)) |>
+  kable(
+    caption = "Aantal in het veld manueel gecontroleerde tracks.
+Aandeel: aandeel manueel controleerde tracks t.o.v. alle tracks per categorie.",
+    align = "lrrr"
+)
+```
+
+```{r overzicht-soort}
+indeling |>
+  filter(!is.na(.data$soort)) |>
+  group_by(vogel = .data$relevant == 2, .data$soort) |>
+  summarise(aantal = sum(.data$aantal), .groups = "drop") |>
+  arrange(desc(.data$aantal)) |>
+  mutate(
+    vogel = factor(.data$vogel, c(TRUE, FALSE), c("ja", "nee")),
+    aandeel = sprintf("%.2f%%", 100 * .data$aantal / sum(.data$aantal))
+  ) |>
+  kable(
+    caption =
+    "Aantal beschikbare tracks opgedeeld volgens identificatie in het veld.
+Aandeel: aandeel t.o.v. het totaal.",
+    longtable = TRUE, booktabs = TRUE, align = "llrr"
+  )
+```
+
+```{r overzicht-manueel2}
+indeling |>
+  filter(!is.na(.data$soort)) |>
+  group_by(
+    manueel = factor(
+      .data$relevant == 2, c(TRUE, FALSE), c("vogel", "geen vogel")
+    ),
+    .data$klasse
+  ) |>
+  summarise(aantal = sum(.data$aantal), .groups = "drop_last") |>
+  mutate(klasse = reorder(.data$klasse, -.data$aantal, FUN = sum)) -> indeling2
+indeling2 |>
+  summarise(aantal = sum(.data$aantal)) |>
+  mutate(klasse = "totaal") |>
+  bind_rows(indeling2) |>
+  mutate(
+    klasse = factor(
+      .data$klasse, c(levels(indeling2$klasse), "totaal")
+    )
+  ) |>
+  pivot_wider(
+    names_from = "manueel", values_from = "aantal", values_fill = 0
+  ) |>
+  arrange(.data$klasse) |>
+  mutate(
+    aandeel = sprintf(
+      "%.1f%%", 100 * .data$vogel / (.data$vogel + .data$`geen vogel`)
+    )
+  ) |>
+  kable(
+    caption = "Manuele controle van automatische classificatie.
+Aandeel: aandeel tracks dat een vogel is per categorie.",
+    align = "lrrr"
+  )
+```
+
+## Relevante tracks
+
+Relevante tracks zijn tracks met een hoge waarschijnlijkheid om een vogel te zijn.
+We stellen dat de tracks voldoende lang in duur moeten zijn.
+Ten eerste omdat we dan zicht krijgen op een mogelijke verplaatsing.
+Ten tweede omdat we voldoende lange tracks nodig hebben wanneer we naar verschillen in gedrag willen kijken.
+Hoewel de tracks een positie per seconde hebben, zullen de meeste punten relatief kleine verschillen hebben.
+Waarschijnlijk moeten we de verschillen over een langere periode (5 of 10 seconden) bekijken.
+We gebruiken als ondergrens 60 seconden voor de duur van de track.
+Dat komt overeen met minstens 12 (1 punt per 5 seconden) of 6 punten (1 punt per 10 seconden).
+We kijken in eerste instantie enkel naar de tracks die door de automatische classificatie als een vogel aangegeven zijn.
+We stellen vast dat bij de kortere tracks het vaker om een misclassificatie gaat (tabel \@ref(tab:relevant-duur)).
+De 95% van de tracks zijn hoogstens 3,5 minuten lang (fig. \@ref(fig:relevant-duur-hist)).
+
+```{r relevant-duur}
+indeling |>
+  filter(str_detect(.data$klasse, "(SMALL_BIRD|MEDIUM_BIRD|FLOCK)")) |>
+  group_by(
+    .data$klasse, .data$duration,
+    vogel = ifelse(
+      is.na(.data$relevant), "automatisch",
+      ifelse(.data$relevant >= 2, "vogel", "geen vogel")
+    )
+  ) |>
+  summarise(totaal = sum(.data$aantal), .groups = "drop") -> duration
+duration |>
+  group_by(
+    .data$klasse, .data$vogel,
+    duur = cut(
+      .data$duration, c(-Inf, 0, 1, Inf), c("< 30 sec", "30-60 sec", ">60 sec")
+    )
+  ) |>
+  summarise(tracks = sum(.data$totaal), .groups = "drop_last") |>
+  mutate(
+    tracks = sprintf("%.1f%%", 100 * .data$tracks / sum(.data$tracks))
+  ) |>
+  ungroup() |>
+  pivot_wider(names_from = "duur", values_from = "tracks") |>
+  kable(caption = "Ruwe indeling in duur per klasse.", align = "llrrr")
+```
+
+```{r relevant-duur-hist, fig.cap = "Histogram van de duur per tracks voor alle tracks die minstens 60 seconden lang zijn. De verticale stippellijn geeft 95% van de tracks aan."}
+duration |>
+  filter(.data$duration > 1) |>
+  group_by(.data$klasse, .data$duration) |>
+  summarise(totaal = sum(.data$totaal), .groups = "drop_last") |>
+  arrange(.data$duration) |>
+  mutate(aandeel = cumsum(.data$totaal / sum(.data$totaal))) -> duration_cum
+ggplot(duration_cum, aes(x = duration / 2, y = aandeel)) +
+  geom_vline(
+    data = duration_cum |>
+      filter(.data$aandeel > 0.95) |>
+      slice_min(.data$duration),
+    aes(xintercept = duration), linetype = 2
+  ) +
+  geom_line() +
+  facet_wrap(~klasse) +
+  scale_x_continuous("duur in minuten") +
+  scale_y_continuous("cumulatieve aandeel tracks", labels = percent)
+```
+
+Behalve de snelheid kunnen we tevens kijken naar de luchtsnelheid van de track.
+Vogels hebben een minimale snelheid nodig om in de lucht te bijven.
+Anderzijds hebben ze een topsnelheid waar ze niet boven kunnen.
+Momenteel weerhouden we enkel tracks met een luchtsnelheid tussen 5 en 30 m/s (18 en 108 km/u).
+Het aantal tracks sneller dan 30 m/s is verwaarloosbaar klein (fig. \@ref(fig:relevant-airspeed)).
+Ongeveer 1% van de tracks is trager dan 5 m/s.
+Bij de manueel gecontroleerde tracks is slechts 0.06% trager dan 5 m/s.
+
+```{r relevant-airspeed, fig.cap = "Histogram van de luchtsnelheid (in m/s) volgens de radar voor tracks van minstens 1 minuut."}
+indeling |>
+  filter(
+    str_detect(.data$klasse, "(SMALL_BIRD|MEDIUM_BIRD|FLOCK)"),
+    .data$duration >= 2, !is.na(.data$speed)
+  ) |>
+  group_by(.data$klasse, .data$speed) |>
+  summarise(totaal = sum(.data$aantal), .groups = "drop_last") |>
+  mutate(
+    totaal = .data$totaal / sum(.data$totaal),
+    indeling = cut(
+      .data$speed, c(-1, 0, 30, Inf), c("traag", "normaal", "snel")
+    )
+  ) -> speed
+ggplot(speed, aes(x = speed, y = totaal, fill = indeling)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~klasse, scales = "free_y") +
+  scale_y_continuous(labels = percent) +
+  theme(axis.title = element_blank())
+```
+
+In tabel \@ref(tab:relevant-import) geven per soort aan welke fractie van ruwe tracks aan deze criteria voldoet.
+De categorie `MEDIUM BIRD` omvat alle ruwe tracks met automatische categorie `MEDIUM BIRD` die niet manueel gecontroleerd werden.
+
+```{r relevant-import}
+"SELECT s.common_name AS soort, COUNT() AS import
+FROM track_time AS t
+INNER JOIN species AS s ON t.species_id = s.id
+GROUP BY s.common_name" |>
+  dbGetQuery(conn = local) -> species_track
+indeling |>
+  filter(!is.na(.data$soort)) |>
+  group_by(.data$soort) |>
+  summarise(totaal = sum(.data$aantal), .groups = "drop") |>
+  left_join(species_track, by = "soort") |>
+  bind_rows(
+    indeling |>
+      filter(is.na(.data$soort)) |>
+      group_by(soort = .data$klasse) |>
+      summarise(totaal = sum(.data$aantal), .groups = "drop") |>
+      inner_join(species_track, by = "soort")
+  ) |>
+  mutate(
+    import = replace_na(.data$import, 0),
+    verhouding = sprintf("%.1f%%", 100 * .data$import / .data$totaal)
+  ) |>
+  arrange(desc(.data$totaal)) |>
+  kable(
+    caption = "Aantal ruwe tracks die voldoen aan de minimale criteria.
+Verhouding geeft het aandeel tracks van minstens 60 seconds met luchtsnelheid
+tussen 5 en 30 m/s.",
+    longtable = TRUE, booktabs = TRUE, align = "lrrr"
+  )
+```
+
+## Gestandaardiseerde tracks
+
+De tracks bevatten ongeveer elke seconde een punt.
+We zetten de tracks om naar tracks met vaste tijdsintervallen.
+We gebruik hiervoor een lineaire interpolatie op basis van de waargenomen posities.
+Wanneer de originele track posities bevat met minder dan 0.9 seconde tussentijd[^02_overzicht-1], dan verwijderen we beide posities.
+Wanneer de snelheid over de grond groter is dan 30 meter per second is, de wijziging in richting groter dan 157.5°, of de tijd tussen twee punten groter dan 5 seconden, splitsen we de tracks tussen deze twee punten.
+We weerhouden enkel de delen die minstens 60 seconden duren.
+
+```{r overzicht-delen, fig.cap = "Aantal ruwe tracks na omzetting in tracks met vaste tijdsintervallen."}
+"WITH cte AS (
+  SELECT track_id, SUM(part >= 0) AS delen
+  FROM track_equal_time
+  GROUP BY track_id
+)
+SELECT delen, COUNT() AS aantal FROM cte GROUP BY delen" |>
+  dbGetQuery(conn = local) -> bruikbare_tracks
+aandeel <- sum(bruikbare_tracks$aantal[bruikbare_tracks$delen > 0]) /
+  sum(bruikbare_tracks$aantal)
+delen_per_track <- sum(bruikbare_tracks$aantal * bruikbare_tracks$delen) /
+ sum(bruikbare_tracks$aantal[bruikbare_tracks$delen > 0])
+bruikbare_tracks |>
+  mutate(aantal = .data$aantal / sum(.data$aantal)) |>
+  ggplot(aes(x = delen, y = aantal)) +
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = percent) +
+  theme(axis.title.y = element_blank())
+```
+
+Op die manier kunnen we `r sprintf("%.1f%%", 100 * aandeel)` van de ruwe tracks omzetten naar tracks met vaste tijdsintervallen (fig. \@ref(fig:overzicht-delen)).
+Gemiddeld resulteert een bruikbare ruwe track in `r sprintf("%.2f", delen_per_track)` tracks met vaste tijdsintervallen.
+
+## Kans op bruikbare gestandaardiseerde tracks in functie van generieke kenmerken
+
+Het standaardizeren van een individuele track is op zicht relatief snel.
+Het grote aantal tracks zorg dat de volledige omzetting veel tijd vraagt.
+Om kosten-effectiever te kunnen werken, kunnen we overwegen om te starten met de ruwe tracks met voldoende potentie.
+
+Beschouwen in eerste instantie enkel de relevante tracks.
+Deze voldoen aan volgende voorwaarden:
+
+-   Ofwel manuele identificatie als vogel, ofwel automatische classificatie als `MEDIUM_BIRD`.
+-   Minimale duur van 1 minuut.
+-   Gemiddelde snelheid tussen 5 en 30 meter per seconde.
+
+Vervolgens kijken we of we minstens één track met gelijke tijdsintervallen overhouden.
+In dat geval beschouwen de ruwe track als bruikbaar.
+Wegens het grote aantal relevant tracks loont het de moeite om na te gaan welke eenvoudig te berekenen kenmerken een invloed hebben om de kans om een bruikbare track op te leveren.
+We beschouwen volgende kenmerken:
+
+1.  Verhouding tussen de oppervlakte van de convex hull en de lengte van de track. Hoe kleiner de verhouding, hoe kleiner het gebied dat de track bestrijkt in verhouding tot de lengte van de track.
+2.  Hoogteverschil tussen het hoogte en laagste punt van de track.
+3.  Midden hoogte: het gemiddelde van de kleinste en grootste hoogte van de track.
+
+Uit de dataverkenning kunnen we al een eerste inschatting maken van de effecten.
+
+-   Bij een lage verhouding is de kans klein op bruikbare tracks (fig. \@ref(fig:bruikbaar-verhouding) en #ref(fig:bruikbaar-lengte-convex-hull)).
+-   Naarmate het hoogteverschil binnen de track groter is, stijgt de kans op een bruikbare track (fig. \@ref(fig:bruikbaar-dz)).
+-   De midden hoogte vertoont een maximum rond de 300 tot 500 m (fig. \@ref(fig:bruikbaar-midz)). Boven 1000 m is het effect onstabiel, deels door het betreft aantal tracks.
+-   Op basis van de combinatie van de verhouding en het hoogteverschil krijgen we de indruk dat beide een ondergrens vertonen (fig. \@ref(fig:bruikbaar-verhouding-dz)).
+-   De combinatie van verhouding en midden hoogte lijkt een optimale gebied te suggereren bij hoge verhouding en midden hoogte onder de 750 m (fig. \@ref(fig:bruikbaar-verhouding-midz)).
+-   De combinatie van verhouding en midden hoogte lijkt een optimale gebied te suggereren bij een midden hoogte onder 750 m en een hoogteverschil boven 100 m (fig. \@ref(fig:bruikbaar-verhouding-midz)).
+
+```{r bruikbaar-import}
+"WITH cte AS (
+  SELECT track_id, MAX(part) > 0 AS bruikbaar FROM track_equal_time
+  GROUP BY track_id
+)
+SELECT c.bruikbaar, COUNT() AS aantal
+FROM track_time AS t
+LEFT JOIN cte AS c ON t.id = c.track_id
+GROUP BY c.bruikbaar" |>
+  dbGetQuery(conn = local) -> imported
+import_total <- sum(imported$aantal)
+sprintf(
+  "%.1f%%",
+  100 * sum(imported$aantal[!is.na(imported$bruikbaar)]) / import_total
+) -> import_part
+import_bruikbaar <- imported$aantal[
+  !is.na(imported$bruikbaar) & imported$bruikbaar == 1
+]
+```
+
+We voeren deze analyse uit op alle relevante tracks die we gestandaardiseerd hebben.
+In eerste instantie hebben we een aselecte set van relevant tracks gestandaardiseerd die de beschikbare variabiliteit van de drie kenmerken volledig dekt.
+Deze set liet om om een eerste analyse uit te voeren.
+In tweede instantie hebben we ons beperkt tot de relevante tracks met een verhouding \> 1 en een hoogteverschil van \> 10 m.
+Om we relatief weinig tracks op lage hoogte hebben, zijn we in eerste instantie met deze tracks gestart.
+De afmeting van de punten in de gegevensverkenning is relatief ten opzicht van het aantal gestandaardiseerde tracks.
+De zone met grotere punten geeft inzage in het verloop van de standaardisatie.
+Momenteel hebben we van de `r import_total` relevante tracks `r import_part` gestandaardiseerd.
+Dit leverde `r import_bruikbaar` bruikbare gestandaardiseerde tracks op.
+
+```{r bruikbaar-generiek}
+"WITH cte AS (
+  SELECT equal_time_id, MAX(t) - MIN(t) AS useable
+  FROM track_equal_time_point
+  GROUP BY equal_time_id
+),
+cte_useable AS (
+  SELECT t.track_id, SUM(c.useable) AS useable, SUM(t.part >= 0) AS parts
+  FROM track_equal_time AS t
+  LEFT JOIN cte AS c ON t.id = c.equal_time_id
+  GROUP BY t.track_id
+)
+SELECT
+  b.id, t.species_id, c.parts, IIF(c.parts = 0, 0, c.useable) AS usable,
+  b.convex_hull / b.length AS verhouding, b.convex_hull, b.length,
+  b.z_max - b.z_min AS dz, (b.z_max + b.z_min) / 2 AS midz
+FROM cte_useable AS c
+INNER JOIN track_bbox AS b ON c.track_id = b.id
+INNER JOIN track_time AS t ON c.track_id = t.id" |>
+  dbGetQuery(conn = local) |>
+  mutate(
+    bruikbaar = as.integer(.data$usable > 0)
+  ) -> usable
+```
+
+```{r bruikbaar-verhouding, fig.cap = "Aandeel bruikbare tracks i.f.v. de verhouding van de oppervlakte van de convex hull en de lengte van de track."}
+usable |>
+  group_by(groep = cut(log(.data$verhouding), pretty(log(.data$verhouding), 100))) |>
+  summarise(
+    x = median(.data$verhouding / 1000), relevant = sum(.data$bruikbaar),
+    aantal = n()
+  ) |>
+  ggplot(aes(x = x, y = relevant / aantal, size = aantal)) +
+  geom_point(alpha = 0.5) +
+  scale_x_log10("verhouding oppervlakte convex hull / lengte track") +
+  scale_y_continuous("aandeel bruikbaar", labels = percent, limits = 0:1) +
+  scale_size("aantal\ntracks", limits = c(0, NA))
+```
+
+```{r bruikbaar-lengte-convex-hull, fig.cap = "Aandeel bruikbare tracks i.f.v. de de oppervlakte van de convex hull en de lengte van de track."}
+usable |>
+  group_by(
+    cut(log(.data$length), pretty(log(.data$length), 50)),
+    cut(log(.data$convex_hull), pretty(log(.data$convex_hull), 50))
+  ) |>
+  summarise(
+    convex_hull = median(.data$convex_hull), .groups = "drop", aantal = n(),
+    bruikbaar = sum(.data$bruikbaar), length = median(.data$length)
+  ) -> ch
+ggplot(ch, aes(x = length, y = convex_hull)) +
+  geom_point(aes(colour = bruikbaar / aantal, size = aantal), alpha = 0.5) +
+  geom_line(
+    data = ch |>
+      distinct(.data$length) |>
+      expand_grid(verhouding = c(0.01, 0.1, 1, 10, 100, 1000)) |>
+      mutate(
+        convex_hull = .data$verhouding * .data$length,
+        verhouding = factor(.data$verhouding)
+      ),
+    aes(linetype = .data$verhouding)
+  ) +
+  scale_x_log10("lengte in (m)") +
+  scale_y_log10("convex hull (in m²)") +
+  scale_colour_gradient2(
+    "aandeel relevant", labels = percent, limits = 0:1, midpoint = 0.5
+  ) +
+  scale_size(limits = c(0, NA))
+```
+
+```{r bruikbaar-dz, fig.cap = "Aandeel bruikbare tracks i.f.v. het hoogteverschil van de track."}
+usable |>
+  group_by(groep = cut(log(.data$dz), pretty(log(.data$dz), 100))) |>
+  summarise(
+    x = median(.data$dz), bruikbaar = sum(.data$bruikbaar), aantal = n()
+  ) |>
+  ggplot(aes(x = x, y = bruikbaar / aantal, size = aantal)) +
+  geom_point(alpha = 0.5) +
+  scale_x_log10("hoogteverschil in m") +
+  scale_y_continuous("aandeel bruikbaar", labels = percent, limits = 0:1) +
+  scale_size("aantal\ntracks", limits = c(0, NA))
+```
+
+```{r bruikbaar-midz, fig.cap = "Aandeel bruikbare tracks i.f.v. de hoogte in het midden van het laagste en het hoogste punt van de track."}
+usable |>
+  group_by(groep = cut(.data$midz, pretty(.data$midz, 100))) |>
+  summarise(
+    x = median(.data$midz), bruikbaar = sum(.data$bruikbaar), aantal = n()
+  ) |>
+  ggplot(aes(x = x, y = bruikbaar / aantal, size = aantal)) +
+  geom_point(alpha = 0.5) +
+  scale_x_continuous("midden hoogte in m") +
+  scale_y_continuous("aandeel relevant", labels = percent, limits = 0:1) +
+  scale_size("aantal\ntracks", limits = c(0, NA))
+```
+
+```{r bruikbaar-verhouding-dz, fig.cap = "Aandeel bruikbare tracks i.f.v. de verhouding van de oppervlakte van de convex hull en de lengte van de track en het hoogteverschil van de track."}
+usable |>
+  group_by(
+    cut(log(.data$verhouding), pretty(log(.data$verhouding), 50)),
+    cut(log(.data$dz), pretty(log(.data$dz), 50))
+  ) |>
+  summarise(
+    dz = median(.data$dz), .groups = "drop", bruikbaar = sum(.data$bruikbaar),
+    verhouding = median(.data$verhouding), aantal = n()
+  ) |>
+  ggplot(aes(x = verhouding, y = dz, colour = bruikbaar / aantal)) +
+  geom_point(aes(size = aantal), alpha = 0.5) +
+  scale_x_log10("verhouding convex hull / lengte") +
+  scale_y_log10("hoogteverschil in m") +
+  scale_colour_gradient2(
+    "aandeel relevant", labels = percent, limits = 0:1, midpoint = 0.5
+  ) +
+  scale_size(limits = c(0, NA))
+```
+
+```{r bruikbaar-verhouding-midz, fig.cap = "Aandeel bruikbare tracks i.f.v. de verhouding van de oppervlakte van de convex hull en de lengte van de track en de middenhoogte van een track."}
+usable |>
+  group_by(
+    cut(log(.data$verhouding), pretty(log(.data$verhouding), 50)),
+    cut(.data$midz, pretty(.data$midz, 50))
+  ) |>
+  summarise(
+    midz = median(.data$midz), .groups = "drop", aantal = n(),
+    bruikbaar = sum(.data$bruikbaar), verhouding = median(.data$verhouding)
+  ) |>
+  ggplot(aes(x = verhouding, y = midz, colour = bruikbaar / aantal)) +
+  geom_point(aes(size = aantal), alpha = 0.5) +
+  scale_x_log10("verhouding convex hull / lengte") +
+  scale_y_continuous("midden hoogte in m") +
+  scale_colour_gradient2(
+    "aandeel relevant", labels = percent, limits = 0:1, midpoint = 0.5
+  ) +
+  scale_size(limits = c(0, NA))
+```
+
+```{r bruikbaar-dz-midz, fig.cap = "Aandeel bruikbare tracks i.f.v. het hoogteverschil van de track en de middenhoogte van de track."}
+usable |>
+  group_by(
+    cut(log(.data$dz), pretty(log(.data$dz), 50)),
+    cut(.data$midz, pretty(.data$midz, 50))
+  ) |>
+  summarise(
+    dz = median(.data$dz), midz = median(.data$midz), .groups = "drop",
+    aantal = n(), bruikbaar = sum(.data$bruikbaar)
+  ) |>
+  ggplot(aes(x = dz, y = midz, colour = bruikbaar / aantal)) +
+  geom_point(aes(size = aantal), alpha = 0.5) +
+  scale_x_log10("hoogteverschil") +
+  scale_y_continuous("midden hoogte in m") +
+  scale_colour_gradient2(
+    "aandeel relevant", labels = percent, limits = 0:1, midpoint = 0.5
+  ) +
+  scale_size(limits = c(0, NA))
+```
+
+```{r relevant-model, eval = FALSE}
+usable |>
+  transmute(
+    length = log(.data$length / 1e3) / 10, dz = log(.data$dz) / 10, .data$midz,
+    convex_hull = log(.data$convex_hull / 1e6) / 10,
+    ch_l = .data$convex_hull - .data$length, .data$relevant
+  ) -> useable_data
+poly(useable_data$ch_l, 2) |>
+  as.data.frame() |>
+  `colnames<-`(c("ch_l_1", "ch_l_2")) |>
+  bind_cols(
+    poly(useable_data$dz, 2) |>
+      as.data.frame() |>
+      `colnames<-`(c("dz_1", "dz_2")),
+    poly(useable_data$midz, 2) |>
+      as.data.frame() |>
+      `colnames<-`(c("midz_1", "midz_2")),
+    useable_data
+  ) -> useable_data
+m0 <- inla(
+  relevant ~ length, family = "binomial", data = useable_data,
+  control.compute = list(waic = TRUE)
+)
+m1 <- inla(
+  relevant ~ ch_l, family = "binomial", data = useable_data,
+  control.compute = list(waic = TRUE)
+)
+m2 <- inla(
+  relevant ~ dz, family = "binomial", data = useable_data,
+  control.compute = list(waic = TRUE)
+)
+m3 <- inla(
+  relevant ~ convex_hull, family = "binomial", data = useable_data,
+  control.compute = list(waic = TRUE)
+)
+m4 <- inla(
+  relevant ~ midz, family = "binomial", data = useable_data,
+  control.compute = list(waic = TRUE)
+)
+m5 <- inla(
+  relevant ~ midz_1 + midz_2, family = "binomial", data = useable_data,
+  control.compute = list(waic = TRUE)
+)
+m2a <- inla(
+  relevant ~ dz + length, family = "binomial", data = useable_data,
+  control.compute = list(waic = TRUE)
+)
+m2b <- inla(
+  relevant ~ dz + convex_hull, family = "binomial", data = useable_data,
+  control.compute = list(waic = TRUE)
+)
+m2c <- inla(
+  relevant ~ dz + ch_l, family = "binomial", data = useable_data,
+  control.compute = list(waic = TRUE)
+)
+m2d <- inla(
+  relevant ~ dz + midz_1 + midz_2, family = "binomial", data = useable_data,
+  control.compute = list(waic = TRUE)
+)
+m2c0 <- inla(
+  relevant ~ dz * ch_l, family = "binomial", data = useable_data,
+  control.compute = list(waic = TRUE)
+)
+m2c1 <- inla(
+  relevant ~ dz_1 + dz_2 + ch_l, family = "binomial", data = useable_data,
+  control.compute = list(waic = TRUE)
+)
+m2c2 <- inla(
+  relevant ~ dz + ch_l_1 + ch_l_2, family = "binomial", data = useable_data,
+  control.compute = list(waic = TRUE)
+)
+m2c3 <- inla(
+  relevant ~ dz + ch_l + midz_1 + midz_2, family = "binomial", data = useable_data,
+  control.compute = list(waic = TRUE)
+)
+m2c2a <- inla(
+  relevant ~ dz * (ch_l_1 + ch_l_2), family = "binomial", data = useable_data,
+  control.compute = list(waic = TRUE)
+)
+m2c2b <- inla(
+  relevant ~ dz_1 + dz_2 + ch_l_1 + ch_l_2, family = "binomial",
+  data = useable_data, control.compute = list(waic = TRUE)
+)
+m2c2c <- inla(
+  relevant ~ dz + ch_l_1 + ch_l_2 + midz_1 + midz_2, family = "binomial",
+  data = useable_data, control.compute = list(waic = TRUE)
+)
+m2c2a0 <- inla(
+  relevant ~ dz * (ch_l_1 + ch_l_2) + midz_1 + midz_2, family = "binomial",
+  data = useable_data, control.compute = list(waic = TRUE)
+)
+m2c2a1 <- inla(
+  relevant ~ (dz_1 + dz_2) * (ch_l_1 + ch_l_2), family = "binomial",
+  data = useable_data, control.compute = list(waic = TRUE)
+)
+m2c2a0a <- inla(
+  relevant ~ (dz_1 + dz_2) * (ch_l_1 + ch_l_2) + midz_1 + midz_2,
+  family = "binomial", data = useable_data, control.compute = list(waic = TRUE)
+)
+m2c2a0b <- inla(
+  relevant ~ (dz + midz_1 + midz_2) * (ch_l_1 + ch_l_2), family = "binomial",
+  data = useable_data, control.compute = list(waic = TRUE)
+)
+m2c2a0c <- inla(
+  relevant ~ dz * (ch_l_1 + ch_l_2 + midz_1 + midz_2), family = "binomial",
+  data = useable_data, control.compute = list(waic = TRUE)
+)
+m2c2a0c0 <- inla(
+  relevant ~ (dz_1 + dz_2) * (ch_l_1 + ch_l_2 + midz_1 + midz_2), family = "binomial", data = useable_data,
+  control.compute = list(waic = TRUE)
+)
+m2c2a0c1 <- inla(
+  relevant ~ (dz + ch_l_1 + ch_l_2 + midz_1 + midz_2) ^ 2, family = "binomial",
+  data = useable_data, control.compute = list(waic = TRUE)
+)
+c(
+  m0 = m0$waic$waic, m1 = m1$waic$waic, m2 = m2$waic$waic, m3 = m3$waic$waic,
+  m4 = m4$waic$waic, m5 = m5$waic$waic, m2a = m2a$waic$waic,
+  m2b = m2b$waic$waic, m2c = m2c$waic$waic, m2d = m2d$waic$waic,
+  m2c0 = m2c0$waic$waic, m2c1 = m2c1$waic$waic, m2c2 = m2c2$waic$waic,
+  m2c3 = m2c3$waic$waic, m2c2a = m2c2a$waic$waic, m2c2b = m2c2b$waic$waic,
+  m2c2c = m2c2c$waic$waic, m2c2a0 = m2c2a0$waic$waic, m2c2a1 = m2c2a1$waic$waic,
+  m2c2a0a = m2c2a0a$waic$waic, m2c2a0b = m2c2a0b$waic$waic,
+  m2c2a0c = m2c2a0c$waic$waic, m2c2a0c0 = m2c2a0c0$waic$waic,
+  m2c2a0c1 = m2c2a0c1$waic$waic
+) |>
+  sort()
+m2c2a0c1$summary.fixed
+```
+
+```{r relevant-fit}
+usable |>
+  transmute(
+    dz = log(.data$dz) / 10, midz = .data$midz / 1000, .data$bruikbaar,
+    ch_l = log(.data$verhouding) / 10
+  ) -> useable_data
+useable_data |>
+  distinct(
+    midz = round(.data$midz / 0.1) * 0.1,
+    ch_l = round(.data$ch_l * 50) / 50,
+    dz = log(10 ^ ceiling(log10(exp(10 * .data$dz)))) / 10
+  ) |>
+  filter(0 < .data$midz, .data$midz < 1) |>
+  bind_rows(useable_data) -> useable_data
+poly(useable_data$ch_l, 2) |>
+  as.data.frame() |>
+  `colnames<-`(c("ch_l_1", "ch_l_2")) |>
+  bind_cols(
+    poly(useable_data$midz, 2) |>
+      as.data.frame() |>
+      `colnames<-`(c("midz_1", "midz_2")),
+    useable_data
+  ) -> useable_data
+model_relevant <- inla(
+  bruikbaar ~ (dz + ch_l_1 + ch_l_2 + midz_1 + midz_2) ^ 2, family = "binomial",
+  data = useable_data, control.compute = list(waic = TRUE),
+  control.predictor = list(link = 1)
+)
+model_relevant$summary.fitted.values |>
+  select("mean", lcl = "0.025quant", ucl = "0.975quant") |>
+  bind_cols(useable_data) |>
+  filter(is.na(.data$bruikbaar)) |>
+  mutate(
+    dz = exp(10 * .data$dz), verhouding = exp(10 * .data$ch_l),
+    midz = .data$midz * 1000
+  ) -> predicted_relevant
+```
+
+\FloatBarrier
+
+In fig.
+\@ref(fig:relevant-prediction) geven we de voorspelde kans op een bruikbare track weer in functie van de verhouding tussen de oppervlakte van de convex hull en de lengte van de track, het hoogteverschil en de midden hoogte van de track.
+We hebben de hoogste kans op een bruikbare track wanneer de verhouding tussen 25 en 1000 is, het hoogteverschil minstens 10 m is en de midden hoogte onder de 800 m blijft.
+
+```{r relevant-prediction, fig.cap = "Voorspeld aandeel bruikbare tracks i.f.v. de verhouding van de oppervlakte van de convex hull en de lengte van de track, het hoogteverschil van de track en de middenhoogte van de track.", warning=FALSE, message = FALSE}
+predicted_relevant |>
+  filter(.data$dz > 0.2) |>
+  mutate(dz = factor(.data$dz)) |>
+  ggplot(aes(x = verhouding, y = mean, ymin = lcl, ymax = ucl)) +
+  geom_hline(yintercept = 0.25, linetype = 2) +
+  geom_vline(xintercept = c(25, 1000), linetype = 2) +
+  geom_ribbon(aes(fill = dz), alpha = 0.2) +
+  geom_line(aes(colour = dz)) +
+  scale_x_log10("verhouding convex hull / lengte") +
+  scale_y_continuous(labels = percent, limits = 0:1) +
+  scale_colour_discrete("hoogteverschil") +
+  scale_fill_discrete("hoogteverschil") +
+  facet_wrap(~midz)
+```
+
+[^02_overzicht-1]: in de praktijk vaak minder dan 0.1 seconde
+

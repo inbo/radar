@@ -1,2 +1,5 @@
 bastion.sh
 vleemo_connect.R
+*.log
+*.rds
+*.tex

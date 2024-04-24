@@ -1,0 +1,110 @@
+---
+title: "Analyse van vogeltracks uit radarbeelden"
+author:
+  - name:
+      given: "Thierry"
+      family: "Onkelinx"
+    email: "thierry.onkelinx@inbo.be"
+    orcid: "0000-0001-8804-4216"
+    affiliation: "Research Institute for Nature and Forest (INBO)"
+    corresponding: true
+  - name:
+      given: "Raïsa"
+      family: "Carmen"
+    email: "raisa.carmen@inbo.be"
+    orcid: "0000-0003-1025-8702"
+    affiliation: "Research Institute for Nature and Forest (INBO)"
+reviewer:
+  - name:
+      given: "Joris"
+      family: "Everaert"
+    email: "joris.everaert@inbo.be"
+    orcid: "0000-0002-8414-5877"
+    affiliation: "Instituut voor Natuur- en Bosonderzoek (INBO)"
+lang: nl
+style: INBO
+public_report: FALSE 
+client:
+  - VLEEMO NV
+  - Hoge Weg 157
+  - 2940 Hoevenen
+  - informatie@vleemo.be
+  - https://www.vleemo.be
+client_logo: vleemo.png
+floatbarrier: subsubsection
+keywords: "radar; vogels; windmolen"
+community: "inbo"
+publication_type: report
+funder: Instituut voor Natuur- en Bosonderzoek (INBO)
+rightsholder: Instituut voor Natuur- en Bosonderzoek (INBO)
+bibliography: references.bib
+link-citations: TRUE
+site: bookdown::bookdown_site
+params:
+  rotor_diameter: 115
+  sqlite: ../../../vleemo
+  tip_height: 190
+  voxel_size: 30
+  threshold: .6666666666
+output:
+  INBOmd::gitbook: default
+  INBOmd::pdf_report: default
+  INBOmd::epub_book: default
+# Don't run the format below.
+# Only required for RStudio to recognise the project as a bookdown project.
+# Hence don't use 'Build all formats'.
+  bookdown::dontrun: default
+---
+
+# Samenvatting {.unnumbered}
+
+<!-- description: start -->
+
+De tekst voor de verplichte samenvatting.
+Hou het [Heerlijk Helder](https://overheid.vlaanderen.be/communicatie/heerlijk-helder).
+<!-- description: end -->
+
+```{r setup, include = FALSE}
+library(birdradar)
+library(effectclass)
+library(fmesher)
+library(INBOtheme)
+library(INLA)
+library(knitr)
+library(lubridate)
+library(RSQLite)
+library(scales)
+library(sf)
+library(tidyverse)
+conflicted::conflicts_prefer(
+  dplyr::filter, dplyr::lag, INBOtheme::scale_fill_gradient
+)
+opts_chunk$set(
+  echo = FALSE, eval = TRUE, cache = FALSE, warning = TRUE, error = FALSE,
+  message = TRUE, fig.width = 6
+)
+local <- dbConnect(
+  drv = SQLite(), file.path(params$sqlite, "radar.sqlite"), flags = SQLITE_RO,
+  synchronous = NULL
+)
+if (interactive()) {
+  theme_set(theme_inbo(base_size = 10))
+} else {
+  switch(
+    opts_knit$get("rmarkdown.pandoc.to"),
+    html = {
+      opts_chunk$set(dev = "png", dpi = 72)
+      theme_set(theme_inbo(base_size = 12))
+    },
+    latex = {
+      opts_chunk$set(dev = "cairo_pdf", dpi = 300)
+      theme_set(theme_inbo(base_size = 9))
+      update_geom_defaults("point", list(size = 1.5))
+    },
+    epub3 = {
+      opts_chunk$set(dev = "png", dpi = 300)
+      theme_set(theme_inbo(base_size = 12))
+    }
+  )
+}
+```
