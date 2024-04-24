@@ -15,8 +15,10 @@ BugReports: https://github.com/inbo/birdradar/issues
 Imports:
     assertthat,
     cli,
+    curl,
     dplyr,
     fs,
+    png,
     purrr,
     Rfast,
     rlang,
@@ -24,7 +26,8 @@ Imports:
     sf,
     stringr,
     tibble,
-    tidyr
+    tidyr,
+    tools
 Suggests:
     INLA,
     osmdata,
