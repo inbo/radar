@@ -62,7 +62,7 @@ ORDER BY t.common_name",
 (
   id INTEGER PRIMARY KEY AUTOINCREMENT, track_id INTEGER NOT NULL,
   scheme_id INTEGER, species_id INTEGER, start INTEGER NOT NULL,
-  duration NUMERIC NOT NULL, wind_speed NUMERIC, wind_direction NUMERIC
+  duration NUMERIC NOT NULL, wind_speed NUMERIC, wind_direction NUMERIC,
   FOREIGN KEY(scheme_id) REFERENCES scheme(id),
   FOREIGN KEY(species_id) REFERENCES species(id)
 )" |>

@@ -1,7 +1,7 @@
 #' Append generic movement parameters
 #' @inheritParams add_vleemo_observed_track
 #' @importFrom assertthat assert_that
-#' @importFrom RSQLite dbAppendTable dbClearResult dbGetQuery dbSendQuery
+#' @importFrom RSQLite dbAppendTable dbExecute dbGetQuery
 #' @export
 generic_movement <- function(local) {
   stopifnot(requireNamespace("INLA", quietly = TRUE))
@@ -16,8 +16,7 @@ generic_movement <- function(local) {
   pitch_eta_sd NUMERIC, pitch_alpha_mean NUMERIC, pitch_alpha_sd NUMERIC,
   FOREIGN KEY(id) REFERENCES track_equal_time(id)
 )" |>
-    dbSendQuery(conn = local) |>
-    dbClearResult()
+    dbExecute(conn = local)
   while (TRUE) {
     "WITH cte AS (
   SELECT t.id

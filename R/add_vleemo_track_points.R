@@ -6,7 +6,7 @@
 #' @importFrom dplyr transmute
 #' @importFrom sf st_coordinates st_read
 #' @importFrom rlang .data
-#' @importFrom RSQLite dbAppendTable dbClearResult dbGetQuery dbSendQuery
+#' @importFrom RSQLite dbAppendTable dbExecute dbGetQuery
 #' @export
 add_vleemo_track_points <- function(local, remote) {
   assert_that(
@@ -18,16 +18,13 @@ add_vleemo_track_points <- function(local, remote) {
     id INTEGER PRIMARY KEY AUTOINCREMENT, track_id INTEGER NOT NULL,
     part INTEGER NOT NULL, FOREIGN KEY(track_id) REFERENCES track_time(id)
   )" |>
-    dbSendQuery(conn = local) |>
-    dbClearResult()
+    dbExecute(conn = local)
   "DROP INDEX IF EXISTS track_equal_time_idx" |>
-    dbSendQuery(conn = local) |>
-    dbClearResult()
+    dbExecute(conn = local)
   on.exit(
     "CREATE UNIQUE INDEX IF NOT EXISTS track_equal_time_idx ON track_equal_time
     (track_id, part)" |>
-      dbSendQuery(conn = local) |>
-      dbClearResult(),
+      dbExecute(conn = local),
     add = TRUE
   )
   "CREATE TABLE IF NOT EXISTS track_equal_time_point
@@ -37,27 +34,24 @@ add_vleemo_track_points <- function(local, remote) {
     z NUMERIC NOT NULL,
     FOREIGN KEY(equal_time_id) REFERENCES track_equal_time(id)
   )" |>
-    dbSendQuery(conn = local) |>
-    dbClearResult()
+    dbExecute(conn = local)
   "DROP INDEX IF EXISTS track_equal_time_point_idx" |>
-    dbSendQuery(conn = local) |>
-    dbClearResult()
+    dbExecute(conn = local)
   on.exit(
     "CREATE UNIQUE INDEX IF NOT EXISTS track_equal_time_point_idx
     ON track_equal_time_point (equal_time_id, t)" |>
-      dbSendQuery(conn = local) |>
-      dbClearResult(),
+      dbExecute(conn = local),
     add = TRUE
   )
   "SELECT t.id, s.scheme, tt.scheme_id, tt.track_id
 FROM track_bbox AS t
 INNER JOIN track_time AS tt ON t.id = tt.id
 INNER JOIN scheme AS s ON tt.scheme_id = s.id
+INNER JOIN species AS sp ON tt.species_id = sp.id
 LEFT JOIN track_equal_time AS c ON t.id = c.track_id
 WHERE
   c.track_id IS NULL AND t.convex_hull > t.length AND t.z_max > t.z_min + 10
-ORDER BY t.z_max, t.z_min
-LIMIT 10" |>
+ORDER BY sp.relevant DESC, t.z_max, t.z_min" |>
     dbGetQuery(conn = local) -> track_id
   cli_progress_bar(
     name = "add missing vleemo track points", total = nrow(track_id)
