@@ -27,7 +27,8 @@ Imports:
     stringr,
     tibble,
     tidyr,
-    tools
+    tools,
+    utils
 Suggests:
     INLA,
     osmdata,

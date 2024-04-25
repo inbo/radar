@@ -11,6 +11,7 @@
 #' @importFrom rlang .data
 #' @importFrom stringr str_replace
 #' @importFrom tools R_user_dir
+#' @importFrom utils file_test
 osm_tile <- function(
   bbox = c(xmin = 4.26, ymin = 51.22, xmax = 4.50, ymax = 51.35),
   extra_zoom = 0, cache_path = R_user_dir("birdradar", which = "cache")
