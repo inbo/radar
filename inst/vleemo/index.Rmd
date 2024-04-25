@@ -24,6 +24,9 @@ reviewer:
 lang: nl
 style: INBO
 public_report: FALSE 
+year: 2024
+cover_photo: https://img4.vildaphoto.net/asset/l/53895.jpg
+cover_description: Windmolens. ©Jeroen Mentens, Vildaphoto.
 client:
   - VLEEMO NV
   - Hoge Weg 157

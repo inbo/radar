@@ -16,6 +16,7 @@
 *.shx
 *.xls*
 *_files
+cover.txt
 docs
 libs
 output

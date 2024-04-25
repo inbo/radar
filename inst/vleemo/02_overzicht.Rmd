@@ -132,23 +132,23 @@ Waarschijnlijk moeten we de verschillen over een langere periode (5 of 10 second
 We gebruiken als ondergrens 60 seconden voor de duur van de track.
 Dat komt overeen met minstens 12 (1 punt per 5 seconden) of 6 punten (1 punt per 10 seconden).
 We kijken in eerste instantie enkel naar de tracks die door de automatische classificatie als een vogel aangegeven zijn.
-We stellen vast dat bij de kortere tracks het vaker om een misclassificatie gaat (tabel \@ref(tab:relevant-duur)).
-De 95% van de tracks zijn hoogstens 3,5 minuten lang (fig. \@ref(fig:relevant-duur-hist)).
+We stellen vast dat bij de kortere tracks het vaker om een verkeerde indeling gaat (tabel \@ref(tab:relevant-duur)).
+95% van de tracks zijn hoogstens 3,5 minuten lang (fig. \@ref(fig:relevant-duur-hist)).
 
 ```{r relevant-duur}
 indeling |>
   filter(str_detect(.data$klasse, "(SMALL_BIRD|MEDIUM_BIRD|FLOCK)")) |>
   group_by(
     .data$klasse, .data$duration,
-    vogel = ifelse(
-      is.na(.data$relevant), "automatisch",
+    manueel = ifelse(
+      is.na(.data$relevant), "enkel automatisch",
       ifelse(.data$relevant >= 2, "vogel", "geen vogel")
     )
   ) |>
   summarise(totaal = sum(.data$aantal), .groups = "drop") -> duration
 duration |>
   group_by(
-    .data$klasse, .data$vogel,
+    .data$klasse, .data$manueel,
     duur = cut(
       .data$duration, c(-Inf, 0, 1, Inf), c("< 30 sec", "30-60 sec", ">60 sec")
     )
@@ -182,13 +182,13 @@ ggplot(duration_cum, aes(x = duration / 2, y = aandeel)) +
   scale_y_continuous("cumulatieve aandeel tracks", labels = percent)
 ```
 
-Behalve de snelheid kunnen we tevens kijken naar de luchtsnelheid van de track.
-Vogels hebben een minimale snelheid nodig om in de lucht te bijven.
+Behalve de lengte van de track kunnen we tevens kijken naar de luchtsnelheid van de track.
+Vogels hebben een minimale snelheid nodig om in de lucht te blijven.
 Anderzijds hebben ze een topsnelheid waar ze niet boven kunnen.
 Momenteel weerhouden we enkel tracks met een luchtsnelheid tussen 5 en 30 m/s (18 en 108 km/u).
 Het aantal tracks sneller dan 30 m/s is verwaarloosbaar klein (fig. \@ref(fig:relevant-airspeed)).
 Ongeveer 1% van de tracks is trager dan 5 m/s.
-Bij de manueel gecontroleerde tracks is slechts 0.06% trager dan 5 m/s.
+Slechts zes van de manueel gecontroleerde tracks zijn vogels waarbij de snelheid trager dan 5 m/s was.
 
 ```{r relevant-airspeed, fig.cap = "Histogram van de luchtsnelheid (in m/s) volgens de radar voor tracks van minstens 1 minuut."}
 indeling |>
@@ -211,8 +211,9 @@ ggplot(speed, aes(x = speed, y = totaal, fill = indeling)) +
   theme(axis.title = element_blank())
 ```
 
-In tabel \@ref(tab:relevant-import) geven per soort aan welke fractie van ruwe tracks aan deze criteria voldoet.
+In tabel \@ref(tab:relevant-import) geven we per soort aan welke fractie van ruwe tracks aan deze criteria voldoet.
 De categorie `MEDIUM BIRD` omvat alle ruwe tracks met automatische categorie `MEDIUM BIRD` die niet manueel gecontroleerd werden.
+Alle andere rijen in de tabel zijn manueel gecontroleerde tracks.
 
 ```{r relevant-import}
 "SELECT s.common_name AS soort, COUNT() AS import
@@ -254,7 +255,7 @@ Wanneer de originele track posities bevat met minder dan 0.9 seconde tussentijd[
 Wanneer de snelheid over de grond groter is dan 30 meter per second is, de wijziging in richting groter dan 157.5°, of de tijd tussen twee punten groter dan 5 seconden, splitsen we de tracks tussen deze twee punten.
 We weerhouden enkel de delen die minstens 60 seconden duren.
 
-```{r overzicht-delen, fig.cap = "Aantal ruwe tracks na omzetting in tracks met vaste tijdsintervallen."}
+```{r overzicht-delen, fig.cap = "Aantal ruwe tracks opgedeeld per aantal bruikbare tracks met vaste intervallen dat de ruwe track oplevert."}
 "WITH cte AS (
   SELECT track_id, SUM(part >= 0) AS delen
   FROM track_equal_time
@@ -274,16 +275,16 @@ bruikbare_tracks |>
   theme(axis.title.y = element_blank())
 ```
 
-Op die manier kunnen we `r sprintf("%.1f%%", 100 * aandeel)` van de ruwe tracks omzetten naar tracks met vaste tijdsintervallen (fig. \@ref(fig:overzicht-delen)).
+`r sprintf("%.1f%%", 100 * aandeel)` van de ruwe tracks blijken minstens een bruikbare track met vaste intervallen op te leveren (fig. \@ref(fig:overzicht-delen)).
 Gemiddeld resulteert een bruikbare ruwe track in `r sprintf("%.2f", delen_per_track)` tracks met vaste tijdsintervallen.
 
 ## Kans op bruikbare gestandaardiseerde tracks in functie van generieke kenmerken
 
-Het standaardizeren van een individuele track is op zicht relatief snel.
-Het grote aantal tracks zorg dat de volledige omzetting veel tijd vraagt.
-Om kosten-effectiever te kunnen werken, kunnen we overwegen om te starten met de ruwe tracks met voldoende potentie.
+Het standaardiseren van een individuele track gebeurt op zicht relatief snel.
+Het grote aantal tracks zorgt ervoor dat de volledige omzetting veel tijd vraagt.
+Om tijd en kosten uit te sparen, kunnen we overwegen om te starten met de ruwe tracks met voldoende potentie.
 
-Beschouwen in eerste instantie enkel de relevante tracks.
+We beschouwen in eerste instantie enkel de relevante tracks.
 Deze voldoen aan volgende voorwaarden:
 
 -   Ofwel manuele identificatie als vogel, ofwel automatische classificatie als `MEDIUM_BIRD`.
@@ -295,15 +296,15 @@ In dat geval beschouwen de ruwe track als bruikbaar.
 Wegens het grote aantal relevant tracks loont het de moeite om na te gaan welke eenvoudig te berekenen kenmerken een invloed hebben om de kans om een bruikbare track op te leveren.
 We beschouwen volgende kenmerken:
 
-1.  Verhouding tussen de oppervlakte van de convex hull en de lengte van de track. Hoe kleiner de verhouding, hoe kleiner het gebied dat de track bestrijkt in verhouding tot de lengte van de track.
+1.  Verhouding tussen de oppervlakte van de convex schil (`convex hull`) en de lengte van de track. Hoe kleiner de verhouding, hoe kleiner het gebied dat de track bestrijkt in verhouding tot de lengte van de track.
 2.  Hoogteverschil tussen het hoogte en laagste punt van de track.
 3.  Midden hoogte: het gemiddelde van de kleinste en grootste hoogte van de track.
 
 Uit de dataverkenning kunnen we al een eerste inschatting maken van de effecten.
 
--   Bij een lage verhouding is de kans klein op bruikbare tracks (fig. \@ref(fig:bruikbaar-verhouding) en #ref(fig:bruikbaar-lengte-convex-hull)).
+-   Bij een lage verhouding van de oppervlakte van de convexe schil en de lengte van de track is de kans klein op bruikbare tracks (fig. \@ref(fig:bruikbaar-verhouding) en \@ref(fig:bruikbaar-lengte-convex-hull)).
 -   Naarmate het hoogteverschil binnen de track groter is, stijgt de kans op een bruikbare track (fig. \@ref(fig:bruikbaar-dz)).
--   De midden hoogte vertoont een maximum rond de 300 tot 500 m (fig. \@ref(fig:bruikbaar-midz)). Boven 1000 m is het effect onstabiel, deels door het betreft aantal tracks.
+-   De midden hoogte vertoont een maximum rond de 300 tot 500 m (fig. \@ref(fig:bruikbaar-midz)). Boven 1000 m is het effect onstabiel, deels door het beperkt aantal tracks.
 -   Op basis van de combinatie van de verhouding en het hoogteverschil krijgen we de indruk dat beide een ondergrens vertonen (fig. \@ref(fig:bruikbaar-verhouding-dz)).
 -   De combinatie van verhouding en midden hoogte lijkt een optimale gebied te suggereren bij hoge verhouding en midden hoogte onder de 750 m (fig. \@ref(fig:bruikbaar-verhouding-midz)).
 -   De combinatie van verhouding en midden hoogte lijkt een optimale gebied te suggereren bij een midden hoogte onder 750 m en een hoogteverschil boven 100 m (fig. \@ref(fig:bruikbaar-verhouding-midz)).
@@ -330,10 +331,10 @@ import_bruikbaar <- imported$aantal[
 
 We voeren deze analyse uit op alle relevante tracks die we gestandaardiseerd hebben.
 In eerste instantie hebben we een aselecte set van relevant tracks gestandaardiseerd die de beschikbare variabiliteit van de drie kenmerken volledig dekt.
-Deze set liet om om een eerste analyse uit te voeren.
-In tweede instantie hebben we ons beperkt tot de relevante tracks met een verhouding \> 1 en een hoogteverschil van \> 10 m.
-Om we relatief weinig tracks op lage hoogte hebben, zijn we in eerste instantie met deze tracks gestart.
-De afmeting van de punten in de gegevensverkenning is relatief ten opzicht van het aantal gestandaardiseerde tracks.
+Deze set liet toe om een eerste analyse uit te voeren.
+In tweede instantie hebben we ons beperkt tot de relevante tracks met een verhouding groter dan 1 en een hoogteverschil van groter dan 10 m.
+Omdat we relatief weinig tracks op lage hoogte hebben, zijn we in eerste instantie met deze tracks gestart.
+De grootte van de punten in de figuren is relatief ten opzicht van het aantal gestandaardiseerde tracks met die kenmerken.
 De zone met grotere punten geeft inzage in het verloop van de standaardisatie.
 Momenteel hebben we van de `r import_total` relevante tracks `r import_part` gestandaardiseerd.
 Dit leverde `r import_bruikbaar` bruikbare gestandaardiseerde tracks op.
@@ -365,7 +366,9 @@ INNER JOIN track_time AS t ON c.track_id = t.id" |>
 
 ```{r bruikbaar-verhouding, fig.cap = "Aandeel bruikbare tracks i.f.v. de verhouding van de oppervlakte van de convex hull en de lengte van de track."}
 usable |>
-  group_by(groep = cut(log(.data$verhouding), pretty(log(.data$verhouding), 100))) |>
+  group_by(
+    groep = cut(log(.data$verhouding), pretty(log(.data$verhouding), 100))
+  ) |>
   summarise(
     x = median(.data$verhouding / 1000), relevant = sum(.data$bruikbaar),
     aantal = n()
@@ -565,8 +568,8 @@ m2c2 <- inla(
   control.compute = list(waic = TRUE)
 )
 m2c3 <- inla(
-  relevant ~ dz + ch_l + midz_1 + midz_2, family = "binomial", data = useable_data,
-  control.compute = list(waic = TRUE)
+  relevant ~ dz + ch_l + midz_1 + midz_2, family = "binomial",
+  data = useable_data, control.compute = list(waic = TRUE)
 )
 m2c2a <- inla(
   relevant ~ dz * (ch_l_1 + ch_l_2), family = "binomial", data = useable_data,
@@ -601,8 +604,8 @@ m2c2a0c <- inla(
   data = useable_data, control.compute = list(waic = TRUE)
 )
 m2c2a0c0 <- inla(
-  relevant ~ (dz_1 + dz_2) * (ch_l_1 + ch_l_2 + midz_1 + midz_2), family = "binomial", data = useable_data,
-  control.compute = list(waic = TRUE)
+  relevant ~ (dz_1 + dz_2) * (ch_l_1 + ch_l_2 + midz_1 + midz_2),
+  family = "binomial", data = useable_data, control.compute = list(waic = TRUE)
 )
 m2c2a0c1 <- inla(
   relevant ~ (dz + ch_l_1 + ch_l_2 + midz_1 + midz_2) ^ 2, family = "binomial",
@@ -664,13 +667,13 @@ model_relevant$summary.fitted.values |>
 \FloatBarrier
 
 In fig.
-\@ref(fig:relevant-prediction) geven we de voorspelde kans op een bruikbare track weer in functie van de verhouding tussen de oppervlakte van de convex hull en de lengte van de track, het hoogteverschil en de midden hoogte van de track.
+\@ref(fig:relevant-prediction) geven we de voorspelde kans op een bruikbare track weer in functie van de verhouding tussen de oppervlakte van de convexe schil en de lengte van de track, het hoogteverschil en de midden hoogte van de track.
 We hebben de hoogste kans op een bruikbare track wanneer de verhouding tussen 25 en 1000 is, het hoogteverschil minstens 10 m is en de midden hoogte onder de 800 m blijft.
 
-```{r relevant-prediction, fig.cap = "Voorspeld aandeel bruikbare tracks i.f.v. de verhouding van de oppervlakte van de convex hull en de lengte van de track, het hoogteverschil van de track en de middenhoogte van de track.", warning=FALSE, message = FALSE}
+```{r relevant-prediction, fig.cap = "Voorspeld aandeel bruikbare tracks i.f.v. de verhouding van de oppervlakte van de convex hull en de lengte van de track, het hoogteverschil van de track. Opgesplitst volgens de middenhoogte van de track.", warning=FALSE, message = FALSE}
 predicted_relevant |>
   filter(.data$dz > 0.2) |>
-  mutate(dz = factor(.data$dz)) |>
+  mutate(dz = factor(.data$dz, levels = c(1000, 100, 10, 1))) |>
   ggplot(aes(x = verhouding, y = mean, ymin = lcl, ymax = ucl)) +
   geom_hline(yintercept = 0.25, linetype = 2) +
   geom_vline(xintercept = c(25, 1000), linetype = 2) +
@@ -684,4 +687,3 @@ predicted_relevant |>
 ```
 
 [^02_overzicht-1]: in de praktijk vaak minder dan 0.1 seconde
-

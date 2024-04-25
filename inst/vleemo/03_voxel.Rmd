@@ -4,20 +4,62 @@
 
 Een voxel is het driedimensionale equivalent van een pixel.
 Het is een balk met bepaalde breedte, lengte en hoogte.
-Voor de eenvoud definiëren we de voxel als een kubus met zijde `r params$voxel_size`.
+Voor de eenvoud definiëren we de voxel als een kubus met zijde `r params$voxel_size` m.
 
 Rond elke windmolen creëren we een raster van 21 voxels in elke richting.
 Per voxel tellen we het aantal tracks dat door de voxel gaat.
 Het aantal tracks per voxel is dan een maat voor de activiteit van vogels in de voxel.
 Onze hypothese is dat de activiteit van de vogels afhangt van de positie ten opzicht van de windmolen en van de windrichting.
-Om rekening te houden met de windrichting kozen we om de vogeltracks te roteren rond de positie van de windmodel zodat alle geroteerde tracks noordenwind hebben.
-Een track in noordwest richting bij westenwind zal na de rotatie een track in noordoost richting bij noordenwind zijn.
+Om rekening te houden met de windrichting kozen we om de vogeltracks te roteren rond de positie van de windmodel zodat alle geroteerde tracks zuidenwind hebben.
+In figuur \@ref(fig:voxel-rotate) geven we een voorbeeld waarbij we zowel de originele track met bijhorende windrichting weergeven als de geroteerde versie.
 We centreren het voxelgrid op de voet van de windmolen.
 Een positieve y-waarde is dan het gebied windafwaarts van de windmolen.
 
+```{r voxel-rotate, fig.cap = "Voorbeeld van een track (lijn) en de bijhorende windrichting (pijl) voor en na de rotatie. De fushia pijl geeft de draairihcting weer.", warning=FALSE}
+data.frame(
+  richting = c("voor", "na"), kracht = 200,
+  hoek = c(-pi / 4, pi / 2), x = 0, y = 0
+) |>
+  mutate(
+    xe = .data$x + .data$kracht * cos(.data$hoek),
+    ye = .data$y + .data$kracht * sin(.data$hoek),
+    x1 = lag(.data$xe), y1 = lag(.data$ye)
+  ) -> wind
+"SELECT t, x - 149998.8 AS x, y - 224023.6 AS y, 'voor' AS richting
+FROM track_equal_time AS tet
+INNER JOIN track_equal_time_point AS t ON t.equal_time_id = tet.id
+WHERE tet.id = 222
+ORDER BY t.t" |>
+  dbGetQuery(conn = local) -> track
+track |>
+  mutate(
+    hoek = atan2(.data$y, .data$x) + diff(wind$hoek),
+    afstand = sqrt(.data$x ^ 2 + .data$y ^ 2)
+  ) |>
+  transmute(
+    .data$t, x = .data$afstand * cos(.data$hoek),
+    y = .data$afstand * sin(.data$hoek), richting = "na"
+  ) |>
+  bind_rows(track) |>
+  ggplot(aes(x = x, y = y)) +
+  geom_point(data = wind) +
+  geom_segment(
+    data = wind, aes(xend = xe, yend = ye, colour = richting),
+    arrow = arrow(length = unit(2, "mm"))
+  ) +
+  geom_curve(
+    data = wind, aes(x = x1 / 2, y = y1 / 2, xend = xe / 2, yend = ye / 2),
+    colour = inbo_hoofd, arrow = arrow(length = unit(2, "mm"))
+  ) +
+  geom_path(aes(colour = richting)) +
+  coord_equal() +
+  theme_void() +
+  theme(legend.title = element_blank())
+```
+
 We berekenen het voxelgrid rond alle windmolens in de buurt van de radar.
 We weerhouden enkel de windmolens waar de som van het aantal tracks per voxel over alle voxels minstens 10% van de windmolen met het hoogste aantal bedraagt (fig. \@ref(fig:voxel-windmill-gebruikt)).
-De windmolen in de figuur zijn alle windmolens beschikbaar in OpenStreetMap in de omgeving van de Antwerpse haven.
+De windmolens in de figuur zijn alle windmolens die beschikbaar zijn in OpenStreetMap in de omgeving van de Antwerpse haven.
 
 ```{r voxel-create, eval = !file.exists("voxel_raw.rds")}
 windmill_voxel(
@@ -80,12 +122,12 @@ gebruikt |>
 ```
 
 In figuur \@ref(fig:voxel-raw) tonen we de som over alle relevant windmolens.
-Elke deelfiguur toont een horizontale snede op de verschillende hoogtes.
+Elke deelfiguur toont een horizontale snede op een bepaalde hoogte.
 De meeste activiteit speelt zich af tussen 270 en 450 m.
 Dat is een zone boven het rotorvlak van de windmolens.
 Eventuele andere patronen in de figuur zijn minder duidelijk door het sterke verschil in activiteit tussen de verschillende hoogtes.
 
-```{r voxel-raw, fig.cap = "Overzicht van het totaal aantal tracks per voxel over alle geselecteerde windmodels. In oranje geven we de positie van de mast en rotor weer in 2 dimensies weer. De deelfiguren geven de verschillende hoogtes weer.", fig.height = 7}
+```{r voxel-raw, fig.cap = "Overzicht van het totaal aantal tracks per voxel over alle geselecteerde windmodels. In oranje geven we de positie van de mast en rotor weer in 2 dimensies. De deelfiguren geven de verschillende hoogtes weer.", fig.height = 7}
 voxel |>
   group_by(.data$x, .data$y, .data$z) |>
   summarise(n = sum(.data$n), .groups = "drop") |>
@@ -167,14 +209,14 @@ prec2var <- function(x) {
   1 / x
 }
 inla.tmarginal(
-  prec2var, voxel_model$marginals.hyperpar[["Precision for windmill"]] 
+  prec2var, voxel_model$marginals.hyperpar[["Precision for windmill"]]
 ) |>
   inla.zmarginal(silent = TRUE) -> z
 sigma_windmill_estimate <- format_ci(
   z$mean, lcl = z$quant0.025, ucl = z$quant0.975
 )
 inla.tmarginal(
-  prec2var, voxel_model$marginals.hyperpar[["Precision for zs"]] 
+  prec2var, voxel_model$marginals.hyperpar[["Precision for zs"]]
 ) |>
   inla.zmarginal(silent = TRUE) -> z
 sigma_height_estimate <- format_ci(
@@ -183,14 +225,14 @@ sigma_height_estimate <- format_ci(
 ```
 
 Om beter zicht te krijgen op de patronen, modelleren we ze met behulp van een statistisch model.
-De activiteit $Y_{ixyz}$ in voxel $xy$ in laag $z$ rond windmodel $i$ volgens een Poisson verdeling met gemiddelde $\mu_{ixyz}$ \@ref(eq:Y).
+De activiteit $Y_{ixyz}$ in voxel $xy$ in snede $z$ rond windmodel $i$ volgens een Poisson verdeling met gemiddelde $\mu_{ixyz}$ \@ref(eq:Y).
 Dit gemiddelde $\mu_{ixyz}$ is met een $\log$ link gekoppeld aan de lineaire predictor $\eta_{ixyz}$ \@ref(eq:link).
 De lineaire predictor $\eta_{ixyz}$ hangt af van het globaal gemiddelde $\beta_0$, het effect $b_i$ van de windmolen $i$, het effect van de hoogte $b_z$ en het gemiddelde effect $\xi(xy,z)$ van de voxel $xy$ in laag $z$.
-We veronderstellen dat het windmolen effect uit een Gaussianse verdeling met gemiddelde $0$ en standaard afwijking $\sigma_w$ \@ref(eq:windmill).
+We veronderstellen dat het windmolen effect uit een Gaussiaanse verdeling met gemiddelde $0$ en standaard afwijking $\sigma_w$ \@ref(eq:windmill).
 Het effect van de hoogte modelleren we als een tweede orde toevalsbeweging (second order random walk) \@ref(eq:hoogte).
-Het effect van de voxel $\xi(xy,z)$ modelleren we als horizontale lagen die een Gaussian Markov Random Field (GMRF) volgen waarbij twee boven elkaar gelegen lagen een autogressive model van order 1 volgen \@ref(eq:field).
+Het effect van de voxel $\xi(xy,z)$ modelleren we als horizontale lagen die een `Gaussian Markov Random Field` (`GMRF`) volgen waarbij twee boven elkaar gelegen lagen een autogressief model van order 1 volgen \@ref(eq:field).
 Het model schat de correlatie tussen twee boven elkaar gelegen lagen op `r rho_estimate`.
-Het GMRF zorgt voor een ruimtelijke autocorrelatie in het horizontale vlak volgens een Matern covariantie functie.
+Het `GMRF` zorgt voor een ruimtelijke autocorrelatie in het horizontale vlak volgens een Matern covariantie functie.
 
 ```{=tex}
 \begin{equation}
@@ -223,8 +265,8 @@ Het GMRF zorgt voor een ruimtelijke autocorrelatie in het horizontale vlak volge
   \xi(xy,z) = a \xi(xy, z - 1) + w(xy, z)(\#eq:field)
 \end{equation}
 ```
-In figuur \@ref(fig:voxel-fitted-windmill) geven we het effect de windmolen.
-Het verschil tussen de windmolen met hoogste en laagste activiteit is begrenst omdat we enkel de windmolens gebruiken die minstens 10% van de windmolen met hoogste activiteit hebben.
+In figuur \@ref(fig:voxel-fitted-windmill) geven we het effect van de windmolen.
+Het verschil tussen de windmolen met hoogste en laagste activiteit is begrenst omdat we enkel de windmolens gebruiken die minstens 10% van de activiteit van de windmolen met hoogste activiteit hebben.
 De positie van de radar zal voor een belangrijk deel dit effect verklaren.
 De radar heeft immers een beperkt bereik.
 Afhankelijk van de afstand tussen de radar en de windmolen zal de radar meer of minder tracks kunnen waarnemen.
@@ -251,12 +293,12 @@ voxel_model$summary.random$windmill |>
 
 Zoals we reeds konden verwachten op basis van figuur \@ref(fig:voxel-raw), stellen we een sterk effect volgens de hoogte vast (fig. \@ref(fig:voxel-fitted-height)).
 Tussen 200 en 600 m hoogte stellen we een hoger dan gemiddelde activiteit vast met een piek rond 400 m.
-Onder de 100 m stellen we een sterke afnamen van de activiteit vast.
+Onder de 100 m stellen we een sterke afname van de activiteit vast.
 Dit is mogelijk te wijten aan beperkingen qua zichtbaarheid door de radar.
 
-```{r voxel-fitted-height, fig.cap = "Gemiddelde activiteit in functie van de hoogte. Relatief ten opzichte van de globaal gemiddelde activiteit."}
+```{r voxel-fitted-height, fig.cap = "Effect van de hoogte op de relatieve activiteit. Relatief ten opzichte van de globaal gemiddelde activiteit."}
 delta_label <- function(x) {
-  sprintf("%.1f%%", 100 - 100 * exp(x))
+  sprintf("%.1f%%", 100 * (exp(x) - 1))
 }
 voxel_model$summary.random$zs |>
   mutate(hoogte = .data$ID * params$voxel_size) |>
@@ -268,7 +310,9 @@ voxel_model$summary.random$zs |>
   ) +
   annotate(
     geom = "text", x = Inf, y = c(0, -1, 1) * abs(log(params$threshold)),
-    label = c("referentie", "belangrijke afname", "belangrijke toename"),
+    label = c(
+      "globaal gemiddelde", "belangrijke afname", "belangrijke toename"
+    ),
     vjust = c(-0.1, 1.1, -0.1), hjust = 1, colour = inbo_hoofd, size = 2
   ) +
   stat_fan(aes(link_sd = sd)) +
@@ -280,9 +324,9 @@ voxel_model$summary.random$zs |>
 Ten slotte hebben we nog het effect van de voxels, na de correctie voor het effect van de windmolen en de hoogte.
 Figuur \@ref(fig:voxel-fitted-field) toont twee verschillende patronen.
 Boven 330 m zien we relatief weinig verschillen tussen verschillende posities in de horizontale vlakken.
-Tussen 90 en 210 m stellen we een sterk patroon van in de horizontale lagen.
+Tussen 90 en 210 m stellen we een sterk patroon vast in de horizontale lagen.
 Vlakbij de windmolen is de activiteit beduidend lager dan rond de windmolen.
-Merk op dat dit bereik min of meer overeenkomt met het rotorvlak.
+Merk op dat het bereik van de daling in activiteit min of meer overeenkomt met het rotorvlak.
 De zone met lagere activiteit lijkt windafwaarts van de windmolen (bovenrand van de figuur) iets groter te zijn dan windopwaarts van de windmolen.
 
 ```{r voxel-fitted-field, fig.cap = "Gemiddelde activiteit in de omgeving van een windmolen. Relatief ten opzichte van de globaal gemiddelde activiteit.", fig.height = 7.5}
@@ -391,9 +435,9 @@ readRDS("voxel_control.rds") |>
 ```
 
 Om na te gaan wat de mogelijke invloed van de windmolen is, herhalen we de analyse voor locaties zonder windmolen.
-We generen een set van aselecte punten in de omgeving van windmolen zodat de voxelrasters van de controleset dichtbij de windmolen zijn, zonder overlap tussen de voxelrasters (fig. \@ref(fig:voxel-alt-windmolen)).
+We generen een set van aselecte punten in de omgeving van windmolen zodat de voxelrasters van de controlepunten dichtbij de windmolen zijn, zonder overlap tussen de voxelrasters (fig. \@ref(fig:voxel-alt-windmolen)).
 Ook hier weerhouden we enkel de controlepunten waarvan de activiteit minstens 10% bedraagt van de windmolen met hoogste activiteit.
-De controleset bestaat uit `r sum(alt_centre$type == "controle")` punten, terwijl de originele set uit `r sum(gebruikt$gebruikt)` punten bestaat.
+De controlepunten bestaat uit `r sum(alt_centre$type == "controle")` punten, terwijl de originele set uit `r sum(gebruikt$gebruikt)` punten bestaat.
 
 ```{r voxel-alt-windmolen, fig.cap = "Aselecte controle punten nabij gebruikte windmolens. Kandidaat verwijst naar controle punten met te weinig activiteit.", fig.height = 5}
 alt_centre |>
@@ -410,7 +454,11 @@ do.call(c, windmill_bb_alt$bb) |>
       mutate(type = "windmolen")
   ) -> windmill_bb_alt
 gebruikt |>
-  mutate(type = ifelse(.data$gebruikt, "windmolen", "windmolen\nmet lage activiteit")) |>
+  mutate(
+    type = ifelse(
+      .data$gebruikt, "windmolen", "windmolen\nmet lage activiteit"
+    )
+  ) |>
   bind_rows(alt_centre) |>
   st_transform(crs = 4267) |>
   ggplot() +
@@ -424,8 +472,8 @@ gebruikt |>
   theme(axis.title = element_blank())
 ```
 
-Wanneer we naar de ruwe gegevens van de controleset kijken stellen we opnieuw een sterk effect van de hoogte vast (fig. \@ref(fig:voxel-raw-alt)).
-Om een betere vergelijking te kunnen maken, fitten we hetzelfde statistisch model aan de controleset.
+Wanneer we naar de ruwe gegevens van de controlepunten kijken stellen we opnieuw een sterk effect van de hoogte vast (fig. \@ref(fig:voxel-raw-alt)).
+Om een betere vergelijking te kunnen maken, fitten we hetzelfde statistisch model aan de controlepunten.
 
 ```{r voxel-raw-alt, fig.cap = "Overzicht van het totaal aantal tracks per voxel over willekeurige punten in de buurt van windmolen. De deelfiguren geven de verschillende hoogtes weer.", fig.height = 7}
 voxel_alt |>
@@ -480,13 +528,13 @@ voxel_model_alt <- readRDS("voxel_model_alt.rds")
 
 In eerste instantie kijken we naar de hyperparameters van het model.
 Dit zijn de parameters die de variabiliteit van de verschillende componenten van het model bepalen.
-Bij de controleset stellen we minder sterke correlaties vast (tabel \@ref(tab:voxel-model-hyperpar-alt)).
-De correlatie tussen de horizontal lagen daalt van $0.90$ naar $0.79$.
+Bij de controlepunten stellen we minder sterke correlaties vast (tabel \@ref(tab:voxel-model-hyperpar-alt)).
+De correlatie tussen de horizontale lagen daalt van $0.90$ naar $0.79$.
 De afstand waarover de horizontale autocorrelatie een rol speelt daalt van 460 m naar 320 m.
 De sterke van de horizontale autocorrelatie halveert.
 De verschillen tussen de controle punten daalt met een derde.
-Enkel de variabiliteit van het hoogteeffect verdubbelt nagenoeg.
-Het hoogteeffect beschrijven we met een tweede orde toevalsbeweging.
+Enkel de variabiliteit van het hoogte-effect verdubbelt nagenoeg.
+Het hoogte-effect beschrijven we met een tweede orde toevalsbeweging.
 Een kleine variantie van een tweede orde toevalsbeweging zorg voor een geleidelijk patroon.
 Naarmate de variantie groter is, is het patroon flexibeler.
 
@@ -507,14 +555,14 @@ rho_estimate_alt <- format_ci(
   ucl = voxel_model_alt$summary.hyperpar["GroupRho for xyz", "0.975quant"]
 )
 inla.tmarginal(
-  prec2var, voxel_model_alt$marginals.hyperpar[["Precision for windmill"]] 
+  prec2var, voxel_model_alt$marginals.hyperpar[["Precision for windmill"]]
 ) |>
   inla.zmarginal(silent = TRUE) -> z
 sigma_windmill_estimate_alt <- format_ci(
   z$mean, lcl = z$quant0.025, ucl = z$quant0.975
 )
 inla.tmarginal(
-  prec2var, voxel_model_alt$marginals.hyperpar[["Precision for zs"]] 
+  prec2var, voxel_model_alt$marginals.hyperpar[["Precision for zs"]]
 ) |>
   inla.zmarginal(silent = TRUE) -> z
 sigma_height_estimate_alt <- format_ci(
@@ -711,7 +759,9 @@ post_samp |>
   ) +
   annotate(
     geom = "text", x = Inf, y = c(0, -1, 1) * abs(log(params$threshold)),
-    label = c("referentie", "belangrijke afname", "belangrijke toename"),
+    label = c(
+      "globaal gemiddelde", "belangrijke afname", "belangrijke toename"
+    ),
     vjust = c(-0.1, 1.1, -0.1), hjust = 1, colour = inbo_hoofd, size = 2
   ) +
   stat_fan(aes(link_sd = sd, fill = omgeving)) +
@@ -721,8 +771,8 @@ post_samp |>
 ```
 
 Het verschil bij de voxel is spectaculair.
-Waar we rond de windmolens op lage hoogte sterke patronen vast stellen (fig. \@ref(fig:voxel-fitted-field)), zijn deze bij de controlepunten slechts in beperkte mate aanwezig (fig. \@ref(fig:voxel-fitted-field-alt)).
-De kleurgradient in beide figuren gebruikt dezelfde kleurschaal zodat we ze gemakkelijk met elkaar kunnen vergelijken.
+Waar we rond de windmolens op lage hoogte (tot 300 m) sterke patronen vast stellen (fig. \@ref(fig:voxel-fitted-field)), zijn deze bij de controlepunten slechts in beperkte mate aanwezig (fig. \@ref(fig:voxel-fitted-field-alt)).
+De kleurgradiënt in beide figuren gebruikt dezelfde kleurschaal zodat we ze gemakkelijk met elkaar kunnen vergelijken.
 
 ```{r voxel-fitted-field-alt, fig.cap = "Gemiddelde activiteit in de omgeving van een controlepunt. Relatief ten opzichte van de globaal gemiddelde activiteit.", fig.height = 7.5}
 mesh$loc |>
@@ -750,9 +800,9 @@ mesh$loc |>
 ## Relatief verschil tussen beide modellen
 
 In deze sectie kijken we naar de verschillende in voorspelde waarde tussen beide modellen.
-Kijken we enkel naar de globale verschillen dan blijkt de activiteit rond windmodels gemiddelde `r verschil` te bedragen van de activiteit rond de nabijgelegen controlepunten.
+Kijken we enkel naar de globale verschillen dan blijkt de activiteit rond windmolens gemiddelde `r verschil` te bedragen van de activiteit rond de nabijgelegen controlepunten.
 
-Boven 300 m stellen we geen significant verschil in relevatieve activiteit vast (fig. \@ref(fig:voxel-fitted-height-control)).
+Boven 300 m stellen we geen significant verschil in relatieve activiteit vast (fig. \@ref(fig:voxel-fitted-height-control)).
 Onder 240 m stellen we rond de windmolens een sterke afname van de relatieve activiteit vast.
 
 ```{r voxel-fitted-height-control, fig.cap = "Verschil in relatieve activiteit per hoogte rond windmolens versus rond controlepunten in de omgeving van windmolens."}
@@ -789,16 +839,16 @@ post_height |>
 Aangezien de ruimtelijke patronen rond de windmolens (fig. \@ref(fig:voxel-fitted-field)) en controle (fig. \@ref(fig:voxel-fitted-field-alt)) sterk van elkaar verschillen, hoeft het niet te verbazen dat het verschil tussen beide patronen (fig. \@ref(fig:voxel-fitted-field-controle2)) op zich eveneens een sterk patroon vertoont.
 Boven 300 m is weinig verschil.
 Tussen 90 m en 240 m stellen we een sterke afname in relatieve activiteit vast.
-In figuur \@ref(fig:voxel-fitted-field-controle2-effect) hebben de de verschillen opgedeeld in een aantal klassen.
+In figuur \@ref(fig:voxel-fitted-field-controle2-effect) hebben we de verschillen opgedeeld in een aantal klassen.
 We verwijzen naar @effectclass voor meer uitleg over deze indeling.
 De rode zones geven de gebieden met een statische significante afname weer, de groene zones een statisch significante toename.
 
-```{r voxel-fitted-field-controle2, fig.cap = "Relatief verschil in gemiddelde activiteit rond windmolen versus de controle.", fig.height = 7.5}
+```{r voxel-fitted-field-controle2, fig.cap = "Relatief verschil in gemiddelde activiteit rond windmolen versus de controle. Afname impliceert minder activiteit rond windmolens in vergelijking met de controlepunten.", fig.height = 7.5}
 field_control2 |>
   ggplot(aes(x = x, y = y, fill = median)) +
   geom_raster() +
   scale_fill_gradient2(
-    "relatieve\nactiviteit", breaks = change_breaks(n = 3),
+    "relatief\nverschil in\nactiviteit", breaks = change_breaks(n = 3),
     labels = change_labels, limits = c(-1.7, 1.4)
   ) +
   coord_equal() +
@@ -822,8 +872,8 @@ field_control2 |>
   theme(axis.title = element_blank())
 ```
 
-In figuur \@ref(fig:voxel-fitted-field-controle) geven we het verschil wanneer rekening houden met alle effecten, behalve dat van de individuele windmolen.
-We combineren met andere woorden het globaal gemiddelde, het hoogteeffect en het ruimtelijke patroon.
+In figuur \@ref(fig:voxel-fitted-field-controle) geven we het verschil wanneer we rekening houden met alle effecten, behalve dat van de individuele windmolen.
+We combineren met andere woorden het globaal gemiddelde, het hoogte-effect en het ruimtelijke patroon.
 Op lage hoge is bijna overal een sterke afname van de relatieve activiteit (fig. \@ref(fig:voxel-fitted-field-controle-effect)).
 Het effect van de positie van de windmolen ter hoogte van het rotorvlak is nog steeds zichtbaar.
 
@@ -832,7 +882,7 @@ field_control |>
   ggplot(aes(x = x, y = y, fill = median)) +
   geom_raster() +
   scale_fill_gradient2(
-    "relatieve\nactiviteit", breaks = change_breaks(n = 3),
+    "relatief\nverschil in\nactiviteit", breaks = change_breaks(n = 3),
     labels = change_labels, limits = c(-3.8, 2)
   ) +
   coord_equal() +
@@ -840,7 +890,7 @@ field_control |>
   theme(axis.title = element_blank())
 ```
 
-```{r voxel-fitted-field-controle-effect, fig.cap = "Classificatie relatief verschil in gemiddelde activiteit rond windmolen versus de controle.", fig.height = 7.5}
+```{r voxel-fitted-field-controle-effect, fig.cap = "Classificatie relatief verschil in gemiddelde activiteit rond windmolen versus de controle. Afname impliceert minder activiteit rond windmolens in vergelijking met de controlepunten.", fig.height = 7.5}
 field_control |>
   ggplot(aes(x = x, y = y, fill = effect)) +
   geom_raster() +
