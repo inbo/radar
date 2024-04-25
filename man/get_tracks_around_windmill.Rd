@@ -33,6 +33,9 @@ number.}
 
 \item{rate}{The time difference between points to calculate the step length
 and turning angles.}
+
+\item{operator}{The optional name of the operator of the windmills.
+When set, only returns data from windmills of that operator.}
 }
 \description{
 extracts tracks nearest to windmills

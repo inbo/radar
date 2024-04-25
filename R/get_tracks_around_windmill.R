@@ -3,6 +3,8 @@
 #' @inheritParams equal_time_track
 #' @inheritParams voxel_around_centre
 #' @inheritParams get_tracks_around_centre
+#' @param operator The optional name of the operator of the windmills.
+#' When set, only returns data from windmills of that operator.
 #' @export
 #' @importFrom assertthat assert_that has_name is.count noNA
 #' @importFrom cli cli_progress_bar cli_progress_done cli_progress_update
