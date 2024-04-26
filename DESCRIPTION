@@ -1,20 +1,42 @@
-Package: radar
+Package: birdradar
 Title: Analysing Animal Movement from Radar
-Version: 0.0.0
+Version: 0.0.1
 Authors@R: c(
     person("Thierry", "Onkelinx", , "thierry.onkelinx@inbo.be", role = c("aut", "cre"),
-           comment = c(orcid = "0000-0001-8804-4216", affiliation = "Research Institute for Nature and Forest (INBO)")),
+           comment = c(ORCID = "0000-0001-8804-4216", affiliation = "Research Institute for Nature and Forest (INBO)")),
     person("Raïsa", "Carmen", , "raisa.carmen@inbo.be", role = "aut",
-           comment = c(orcid = "0000-0003-1025-8702", affiliation = "Research Institute for Nature and Forest (INBO)")),
+           comment = c(ORCID = "0000-0003-1025-8702", affiliation = "Research Institute for Nature and Forest (INBO)")),
     person("Research Institute for Nature and Forest (INBO)", , , "info@inbo.be", role = c("cph", "fnd"))
   )
 Description: Helper functions to analyse the data.
 License: GPL-3
-URL: https://github.com/inbo/radar
-BugReports: https://github.com/inbo/radar/issues
-Encoding: UTF-8
+URL: https://github.com/inbo/birdradar
+BugReports: https://github.com/inbo/birdradar/issues
+Imports:
+    assertthat,
+    cli,
+    curl,
+    dplyr,
+    fs,
+    png,
+    purrr,
+    Rfast,
+    rlang,
+    RSQLite,
+    sf,
+    stringr,
+    tibble,
+    tidyr,
+    tools,
+    utils
+Suggests:
+    INLA,
+    osmdata,
+    RPostgreSQL
+Additional_repositories: https://inla.r-inla-download.org/R/stable
 Config/checklist/communities: inbo
 Config/checklist/keywords: bird; windmill
+Encoding: UTF-8
 Language: en-GB
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.1

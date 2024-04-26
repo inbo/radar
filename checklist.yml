@@ -1,8 +1,23 @@
 description: Configuration file for checklist::check_pkg()
 package: yes
 allowed:
-  warnings: []
-  notes: []
+  warnings:
+  - motivation: No vignettes during the development stage
+    value: |-
+      checking for code which exercises the package ... WARNING
+      No examples, no tests, no vignettes
+  notes:
+  - motivation: Package not intended for CRAN
+    value: |-
+      checking CRAN incoming feasibility ... NOTE
+      Maintainer: 'Thierry Onkelinx <thierry.onkelinx@inbo.be>'
+
+      New submission
+
+      Suggests or Enhances not in mainstream repositories:
+        INLA
+      Availability using Additional_repositories specification:
+        INLA   yes   https://inla.r-inla-download.org/R/stable
 required:
 - CITATION
 - DESCRIPTION
@@ -19,5 +34,13 @@ required:
 spelling:
   default: en-GB
   ignore:
-  - .github
   - LICENSE.md
+  - inst/vleemo/LICENSE.md
+  other:
+    fr-BE: inst/vleemo/_001_resume.Rmd
+    nl-BE:
+    - inst/vleemo/01_inleiding.Rmd
+    - inst/vleemo/02_overzicht.Rmd
+    - inst/vleemo/03_voxel.Rmd
+    - inst/vleemo/index.Rmd
+    - inst/vleemo/zzz_references_and_appendix.Rmd
