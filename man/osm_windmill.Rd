@@ -2,11 +2,12 @@
 % Please edit documentation in R/osm_windmill.R
 \name{osm_windmill}
 \alias{osm_windmill}
-\title{Get windmill locations from OpenStreetMap}
+\title{Get wind turbine locations from OpenStreetMap}
 \usage{
 osm_windmill(
   local,
-  bbox = c(xmin = 4.26, ymin = 51.22, xmax = 4.5, ymax = 51.35)
+  bbox = c(xmin = 4.17, ymin = 51.22, xmax = 4.5, ymax = 51.4),
+  min_power = 1
 )
 }
 \arguments{
@@ -21,8 +22,14 @@ returned from \code{getbb(..., format_out = "polygon")}. To search in an
 area, (iv) a character string with a relation or a (closed) way id in
 the format \code{"way(id:1)"}, \code{"relation(id:1, 2)"} or \code{"relation(id:1, 2, 3); way(id:2)"} as returned by \code{getbb(..., format_out = "osm_type_id")}
 or \link[osmdata]{bbox_to_string} with a \code{data.frame} from \code{getbb(..., format_out = "data.frame")} to select all areas combined (relations and ways).}
+
+\item{min_power}{Keep only wind turbines with at least this amount of installed
+power.
+Keeps all turbines without power information on OpenStreetMap.
+The power is expressed in MW.
+Defaults to 1 MW.}
 }
 \description{
-Download the windmill information in the bounding box.
-Store the location, height and operator in the local database.
+Download the wind turbine information in the bounding box.
+Store the location, height, operator and power in the local database.
 }
