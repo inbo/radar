@@ -4,8 +4,8 @@
 #' Store the location, height, operator and power in the local database.
 #' @inheritParams add_vleemo_observed_track
 #' @inheritParams osmdata::opq
-#' @param min_power Keep only wind turbines with at least this amount of installed
-#' power.
+#' @param min_power Keep only wind turbines with at least this amount of
+#' installed power.
 #' Keeps all turbines without power information on OpenStreetMap.
 #' The power is expressed in MW.
 #' Defaults to 1 MW.
